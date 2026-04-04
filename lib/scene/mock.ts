@@ -10,6 +10,9 @@ export const mockScene: SceneJSON = {
         { id: "leg-b", label: "Leg B", x: 520, y: 420, rotationDeg: 0 },
         { id: "shelf-1", label: "Shelf", x: 320, y: 260, rotationDeg: 0 },
       ],
+      confidence: 0.92,
+      tools: [],
+      warnings: [],
     },
     {
       title: "Attach legs to shelf",
@@ -19,6 +22,9 @@ export const mockScene: SceneJSON = {
         { id: "leg-b", label: "Leg B", x: 440, y: 380, rotationDeg: 12 },
         { id: "shelf-1", label: "Shelf", x: 320, y: 280, rotationDeg: 0 },
       ],
+      confidence: 0.88,
+      tools: ["Allen key"],
+      warnings: ["Do not overtighten bolts."],
     },
     {
       title: "Install back panel",
@@ -27,6 +33,9 @@ export const mockScene: SceneJSON = {
         { id: "back", label: "Back panel", x: 320, y: 200, rotationDeg: 0 },
         { id: "shelf-1", label: "Shelf", x: 320, y: 320, rotationDeg: 0 },
       ],
+      confidence: 0.9,
+      tools: ["Phillips screwdriver"],
+      warnings: [],
     },
   ],
 };

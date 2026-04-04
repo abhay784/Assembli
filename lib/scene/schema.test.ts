@@ -33,4 +33,19 @@ describe("sceneSchema", () => {
     });
     expect(parsed.success).toBe(false);
   });
+
+  it("rejects a step missing confidence", () => {
+    const parsed = sceneSchema.safeParse({
+      steps: [
+        {
+          title: "t",
+          caption: "c",
+          parts: [],
+          tools: [],
+          warnings: [],
+        },
+      ],
+    });
+    expect(parsed.success).toBe(false);
+  });
 });

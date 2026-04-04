@@ -50,6 +50,9 @@ function StepFrame({
       <p style={{ fontSize: 20, opacity: 0.8, margin: "0 0 40px" }}>
         {step.caption}
       </p>
+      <p style={{ fontSize: 12, opacity: 0.45, margin: "-32px 0 40px" }}>
+        confidence: {step.confidence.toFixed(2)}
+      </p>
       <div
         style={{
           position: "relative",

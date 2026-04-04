@@ -19,6 +19,9 @@ const stepSchema = z.object({
   title: z.string(),
   caption: z.string(),
   parts: z.array(partSchema),
+  confidence: z.number().min(0).max(1),
+  tools: z.array(z.string()),
+  warnings: z.array(z.string()),
 });
 
 export const sceneSchema = z
