@@ -39,10 +39,21 @@ export async function GET(
     job.finishedOn ?? job.processedOn ?? job.timestamp,
   ).toISOString();
 
+  const returnvalue = job.returnvalue as unknown;
+  const sceneKey =
+    status === "completed" &&
+    returnvalue !== null &&
+    typeof returnvalue === "object" &&
+    "sceneKey" in returnvalue &&
+    typeof (returnvalue as { sceneKey: unknown }).sceneKey === "string"
+      ? (returnvalue as { sceneKey: string }).sceneKey
+      : null;
+
   return NextResponse.json({
     id: job.id,
     status,
     error,
     updatedAt,
+    sceneKey,
   });
 }

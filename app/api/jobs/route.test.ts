@@ -94,9 +94,11 @@ describe("GET /api/jobs/[id]", () => {
     const body = (await response.json()) as {
       status: string;
       error: string | null;
+      sceneKey: string | null;
     };
     expect(body.status).toBe("queued");
     expect(body.error).toBeNull();
+    expect(body.sceneKey).toBeNull();
   });
 
   it("returns processing for active jobs", async () => {
@@ -119,8 +121,66 @@ describe("GET /api/jobs/[id]", () => {
     );
 
     expect(response.status).toBe(200);
-    const body = (await response.json()) as { status: string };
+    const body = (await response.json()) as {
+      status: string;
+      sceneKey: string | null;
+    };
     expect(body.status).toBe("processing");
+    expect(body.sceneKey).toBeNull();
+  });
+
+  it("returns sceneKey when job completed with return value", async () => {
+    vi.mocked(getJobQueue).mockReturnValue({
+      getJob: vi.fn(() =>
+        Promise.resolve({
+          id: "job-done",
+          timestamp: 1,
+          processedOn: 2,
+          finishedOn: 3,
+          failedReason: undefined,
+          returnvalue: { sceneKey: "uploads/job-done/scene.json" },
+          getState: vi.fn(() => Promise.resolve("completed")),
+        }),
+      ),
+    } as never);
+
+    const response = await GET(
+      new Request("http://localhost/api/jobs/job-done"),
+      { params: Promise.resolve({ id: "job-done" }) },
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      status: string;
+      sceneKey: string | null;
+    };
+    expect(body.status).toBe("completed");
+    expect(body.sceneKey).toBe("uploads/job-done/scene.json");
+  });
+
+  it("returns sceneKey null when completed without return value", async () => {
+    vi.mocked(getJobQueue).mockReturnValue({
+      getJob: vi.fn(() =>
+        Promise.resolve({
+          id: "job-norv",
+          timestamp: 1,
+          processedOn: 2,
+          finishedOn: 3,
+          failedReason: undefined,
+          returnvalue: undefined,
+          getState: vi.fn(() => Promise.resolve("completed")),
+        }),
+      ),
+    } as never);
+
+    const response = await GET(
+      new Request("http://localhost/api/jobs/job-norv"),
+      { params: Promise.resolve({ id: "job-norv" }) },
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { sceneKey: string | null };
+    expect(body.sceneKey).toBeNull();
   });
 
   it("returns 404 when the job is missing", async () => {

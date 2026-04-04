@@ -5,6 +5,7 @@ import {
   getRedisConnection,
   parseJobPayload,
 } from "../lib/queue";
+import { runExtractionJob } from "./extraction-pipeline";
 
 if (!process.env.REDIS_URL) {
   console.error("REDIS_URL is required for the Assembli worker.");
@@ -17,7 +18,8 @@ const worker = new Worker(
   ASSEMBLI_QUEUE,
   async (job) => {
     const payload = parseJobPayload(job.data);
-    console.log(`job ${payload.jobId} s3Key=${payload.s3Key}`);
+    console.log(`job ${payload.jobId} s3Key length=${payload.s3Key.length}`);
+    return runExtractionJob(payload);
   },
   { connection },
 );
