@@ -19,7 +19,7 @@ result: [pending]
 
 ### 2. Magic-byte and happy-path upload
 
-expected: Non-PDF bytes with `.pdf` name show **This file does not look like a valid PDF.**; with API + S3 env configured, small real PDF shows **Manual received.** after PUT.
+expected: Non-PDF bytes with `.pdf` name show **This file does not look like a valid PDF.**; with **Redis running** (`docker compose up -d redis`), **REDIS_URL** in `.env`, and **AWS S3** vars (`AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `S3_BUCKET`) set, a small real PDF shows **Manual received.** after PUT. If POST fails, in **development** the UI appends `Details: Could not enqueue job.` (Redis/`REDIS_URL`) or `Details: Could not prepare upload.` (S3/credentials/bucket).
 result: [pending]
 
 ### 3. Remotion Studio mock composition

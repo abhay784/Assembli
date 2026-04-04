@@ -170,12 +170,24 @@ export function ManualUpload() {
         }),
       });
 
+      const sessionPayload = (await sessionResponse.json()) as
+        | { jobId: string; uploadUrl: string; headers: Record<string, string> }
+        | { error?: string };
+
       if (!sessionResponse.ok) {
-        setErrorMessage(COPY.errPresign);
+        const apiError =
+          "error" in sessionPayload && typeof sessionPayload.error === "string"
+            ? sessionPayload.error
+            : "";
+        const devHint =
+          process.env.NODE_ENV === "development" && apiError
+            ? `\n\nDetails: ${apiError}`
+            : "";
+        setErrorMessage(`${COPY.errPresign}${devHint}`);
         return;
       }
 
-      const session = (await sessionResponse.json()) as {
+      const session = sessionPayload as {
         jobId: string;
         uploadUrl: string;
         headers: Record<string, string>;
@@ -311,7 +323,9 @@ export function ManualUpload() {
         <Alert variant="destructive">
           <AlertCircle className="size-4" />
           <AlertTitle>Error</AlertTitle>
-          <AlertDescription>{errorMessage}</AlertDescription>
+          <AlertDescription className="whitespace-pre-line">
+            {errorMessage}
+          </AlertDescription>
         </Alert>
       ) : null}
 
