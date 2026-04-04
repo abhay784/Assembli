@@ -32,9 +32,9 @@ Decimal phases appear between their surrounding integers in numeric order.
 Plans:
 - [x] 01-01-PLAN.md — Next.js 15 bootstrap, Vitest, shared upload constants (25 MB), Redis compose, ESLint/typecheck
 - [x] 01-02-PLAN.md — Zod SceneJSON schema (D-01–D-03), mock fixture, schema Vitest suite
-- [ ] 01-03-PLAN.md — Remotion 4 compositions from mock SceneJSON; Studio entry (D-04)
-- [ ] 01-04-PLAN.md — BullMQ worker scaffold + shared `lib/queue.ts` + `dev:worker` script
-- [ ] 01-05-PLAN.md — POST/GET `/api/jobs`, S3 presigned PUT, enqueue metadata-only jobs
+- [x] 01-03-PLAN.md — Remotion 4 compositions from mock SceneJSON; Studio entry (D-04)
+- [x] 01-04-PLAN.md — BullMQ worker scaffold + shared `lib/queue.ts` + `dev:worker` script
+- [x] 01-05-PLAN.md — POST/GET `/api/jobs`, S3 presigned PUT, enqueue metadata-only jobs
 - [ ] 01-06-PLAN.md — shadcn upload UI per 01-UI-SPEC; magic-byte PDF check; human verify checkpoint
 **UI hint**: yes
 
@@ -79,7 +79,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation | 2/6 | In Progress|  |
+| 1. Foundation | 5/6 | In Progress|  |
 | 2. LLM Extraction | 0/TBD | Not started | - |
 | 3. Audio and Render | 0/TBD | Not started | - |
 | 4. Pipeline Integration and Output | 0/TBD | Not started | - |
