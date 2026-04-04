@@ -53,7 +53,7 @@ Declared values (must be multiples of 4):
 | 2xl | 48px | Major section breaks |
 | 3xl | 64px | Page-level spacing |
 
-Exceptions: **Minimum 44×44px** hit target for the **“Choose PDF from device”** control (button or file-input trigger) — WCAG 2.5.5 Target Size; height/width may be 44px even when internal padding uses `sm`/`md`.
+Exceptions: **Minimum 44×44px** hit target for the **“Choose PDF from device”** control (button or file-input trigger) — WCAG 2.5.5 Target Size; height/width may be 44px even when internal padding uses `sm`/`md`. **Hairline strokes** (e.g. **2px** dropzone border, **2px** `focus-visible` ring) are **not** layout-spacing tokens — they are exempt from the 4px rhythm.
 
 ---
 
