@@ -12,7 +12,7 @@ Assembli converts furniture assembly manuals into narrated, step-by-step explain
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Foundation** - Schema locked, Remotion templates working with mock data, upload flow + infrastructure scaffolded
+- [x] **Phase 1: Foundation** - Schema locked, Remotion templates working with mock data, upload flow + infrastructure scaffolded (completed 2026-04-04)
 - [ ] **Phase 2: LLM Extraction** - PDF parsing and Claude scene JSON extraction producing validated SceneJSON from real manuals
 - [ ] **Phase 3: Audio and Render** - ElevenLabs TTS generation and Remotion render producing a synced video from SceneJSON
 - [ ] **Phase 4: Pipeline Integration and Output** - Full upload-to-video pipeline wired end-to-end with in-browser preview
@@ -35,7 +35,7 @@ Plans:
 - [x] 01-03-PLAN.md — Remotion 4 compositions from mock SceneJSON; Studio entry (D-04)
 - [x] 01-04-PLAN.md — BullMQ worker scaffold + shared `lib/queue.ts` + `dev:worker` script
 - [x] 01-05-PLAN.md — POST/GET `/api/jobs`, S3 presigned PUT, enqueue metadata-only jobs
-- [ ] 01-06-PLAN.md — shadcn upload UI per 01-UI-SPEC; magic-byte PDF check; human verify checkpoint
+- [x] 01-06-PLAN.md — shadcn upload UI per 01-UI-SPEC; magic-byte PDF check; human verify checkpoint
 **UI hint**: yes
 
 ### Phase 2: LLM Extraction
@@ -79,7 +79,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation | 5/6 | In Progress|  |
+| 1. Foundation | 6/6 | Complete    | 2026-04-04 |
 | 2. LLM Extraction | 0/TBD | Not started | - |
 | 3. Audio and Render | 0/TBD | Not started | - |
 | 4. Pipeline Integration and Output | 0/TBD | Not started | - |
