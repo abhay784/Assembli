@@ -12,14 +12,14 @@ Upload a furniture assembly manual, get back a clear, watchable explainer video 
 
 ### Validated
 
-(None yet — ship to validate)
+- Phase 2 (2026-04-04): Claude-backed PDF → Zod-validated SceneJSON pipeline in worker (human UAT pending for real manual).
 
 ### Active
 
 - [ ] User can upload a furniture assembly manual (PDF, DOCX)
-- [ ] System extracts and parses manual content (steps, tools, warnings, diagrams)
-- [ ] Claude LLM simplifies instructions into structured scene JSON
-- [ ] Scene JSON follows a clean, well-defined schema (not raw generated code)
+- [x] System extracts and parses manual content (steps, tools, warnings, diagrams) — PDF path via worker + Claude; DOCX later
+- [x] Claude LLM simplifies instructions into structured scene JSON — `extractSceneFromPdfBuffer`
+- [x] Scene JSON follows a clean, well-defined schema (not raw generated code)
 - [ ] Predefined Remotion animation templates render scenes (parts assembling, arrows, highlights)
 - [ ] ElevenLabs generates voice narration from the step script
 - [ ] System renders final video with animations, captions, and voiceover synced together
@@ -84,4 +84,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-04 after initialization*
+*Last updated: 2026-04-04 after Phase 2 (LLM Extraction) implementation*

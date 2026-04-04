@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: completed
-stopped_at: Phase 2 context gathered
-last_updated: "2026-04-04T23:40:50.906Z"
-last_activity: 2026-04-04
+status: planning
+stopped_at: Phase 2 complete — human UAT open
+last_updated: "2026-04-04T23:55:00.000Z"
+last_activity: 2026-04-04 — Phase 2 execution complete
 progress:
   total_phases: 4
-  completed_phases: 1
-  total_plans: 6
-  completed_plans: 6
-  percent: 100
+  completed_phases: 2
+  total_plans: 10
+  completed_plans: 10
+  percent: 50
 ---
 
 # Project State
@@ -21,22 +21,22 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-04)
 
 **Core value:** Upload a furniture assembly manual, get back a clear, watchable explainer video
-**Current focus:** Phase 2 — LLM Extraction (plan next)
+**Current focus:** Phase 3 — Audio and Render (plan next)
 
 ## Current Position
 
-Phase: 2
+Phase: 3
 Plan: Not started
-Status: Phase 1 complete — confirm checklist in `01-HUMAN-UAT.md`, then `/gsd-discuss-phase 2`
-Last activity: 2026-04-04
+Status: Phase 2 complete (automated); human checklist in `02-HUMAN-UAT.md`
+Last activity: 2026-04-04 — Phase 2 code + verification artifacts landed
 
-Progress: [████░░░░░░] 25%
+Progress: [█████░░░░░] 50%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 6
+- Total plans completed: 10
 - Average duration: —
 - Total execution time: 0 hours
 
@@ -45,6 +45,7 @@ Progress: [████░░░░░░] 25%
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 1 | 6 | - | - |
+| 2 | 4 | - | - |
 
 **Recent Trend:**
 
@@ -67,14 +68,15 @@ Recent decisions affecting current work:
 ### Pending Todos
 
 - Complete human verification items in `.planning/phases/01-foundation/01-HUMAN-UAT.md` (Remotion Studio + browser upload smoke).
+- Complete `.planning/phases/02-llm-extraction/02-HUMAN-UAT.md` (real PDF + worker + S3 + Anthropic E2E).
 
 ### Blockers/Concerns
 
-- [Pre-Phase 2]: Claude behavior on real IKEA-style PDFs (token consumption, hallucination rate) is empirically unknown — token pre-flight threshold needs calibration against real target documents before Phase 2 planning
+- Calibrate `CLAUDE_MAX_PDF_PAGES` against real IKEA-style PDFs after human UAT
 - [Pre-Phase 3]: ElevenLabs account tier character caps and concurrency limits need verification before designing the parallelization strategy
 
 ## Session Continuity
 
-Last session: 2026-04-04T23:40:50.901Z
-Stopped at: Phase 2 context gathered
-Resume file: .planning/phases/02-llm-extraction/02-CONTEXT.md
+Last session: 2026-04-04
+Stopped at: Phase 2 execution complete; advance to Phase 3 planning when ready
+Resume file: `.planning/phases/02-llm-extraction/02-CONTEXT.md`

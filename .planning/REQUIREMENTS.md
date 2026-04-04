@@ -14,9 +14,9 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Content Extraction
 
-- [ ] **EXTRACT-01**: System extracts steps, tools, and warnings from uploaded PDF using Claude API
-- [ ] **EXTRACT-02**: System produces a clean, well-defined scene JSON schema (Zod-validated)
-- [ ] **EXTRACT-03**: Each extracted scene includes a confidence score indicating extraction reliability
+- [x] **EXTRACT-01**: System extracts steps, tools, and warnings from uploaded PDF using Claude API
+- [x] **EXTRACT-02**: System produces a clean, well-defined scene JSON schema (Zod-validated)
+- [x] **EXTRACT-03**: Each extracted scene includes a confidence score indicating extraction reliability
 
 ### Video Generation
 

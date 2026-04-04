@@ -13,7 +13,7 @@ Assembli converts furniture assembly manuals into narrated, step-by-step explain
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Foundation** - Schema locked, Remotion templates working with mock data, upload flow + infrastructure scaffolded (completed 2026-04-04)
-- [ ] **Phase 2: LLM Extraction** - PDF parsing and Claude scene JSON extraction producing validated SceneJSON from real manuals
+- [x] **Phase 2: LLM Extraction** - PDF parsing and Claude scene JSON extraction producing validated SceneJSON from real manuals (completed 2026-04-04)
 - [ ] **Phase 3: Audio and Render** - ElevenLabs TTS generation and Remotion render producing a synced video from SceneJSON
 - [ ] **Phase 4: Pipeline Integration and Output** - Full upload-to-video pipeline wired end-to-end with in-browser preview
 
@@ -47,7 +47,12 @@ Plans:
   2. Each extracted scene includes a confidence score field populated by Claude
   3. PDFs that exceed the token pre-flight threshold are rejected with an informative error before any LLM call is made
   4. Claude output that fails Zod validation triggers a capped retry (max 2) before the job fails gracefully
-**Plans**: TBD
+**Plans**: 4 plans
+Plans:
+- [x] 02-01-PLAN.md — Extend SceneJSON Zod schema (confidence, tools, warnings), mock, JSON Schema export, Remotion types
+- [x] 02-02-PLAN.md — S3 GetObject, pdf-parse page preflight, `CLAUDE_MAX_PDF_PAGES` guard
+- [x] 02-03-PLAN.md — Anthropic SDK, `extractSceneFromPdfBuffer` with Zod retry loop (D-08), tests with mocks
+- [x] 02-04-PLAN.md — Worker extraction pipeline, PutObject `scene.json`, GET job `sceneKey`
 
 ### Phase 3: Audio and Render
 **Goal**: Given valid SceneJSON, the system generates ElevenLabs narration for each step and renders a final Remotion video where slide durations are driven by audio length — not hardcoded values
@@ -80,6 +85,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation | 6/6 | Complete    | 2026-04-04 |
-| 2. LLM Extraction | 0/TBD | Not started | - |
+| 2. LLM Extraction | 4/4 | Complete    | 2026-04-04 |
 | 3. Audio and Render | 0/TBD | Not started | - |
 | 4. Pipeline Integration and Output | 0/TBD | Not started | - |
