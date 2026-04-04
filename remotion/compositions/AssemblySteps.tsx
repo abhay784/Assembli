@@ -1,10 +1,12 @@
 import React from "react";
-import { AbsoluteFill, Series } from "remotion";
+import { AbsoluteFill, Sequence } from "remotion";
 import type { SceneJSON } from "../../lib/scene/schema";
 
 const FRAMES_PER_STEP = 90;
 
 export const AssemblySteps: React.FC<SceneJSON> = ({ steps }) => {
+  const safeSteps = steps ?? [];
+
   return (
     <AbsoluteFill
       style={{
@@ -13,17 +15,19 @@ export const AssemblySteps: React.FC<SceneJSON> = ({ steps }) => {
         fontFamily: "system-ui, sans-serif",
       }}
     >
-      <Series>
-        {steps.map((step, stepIndex) => (
-          <Series.Sequence durationInFrames={FRAMES_PER_STEP} key={stepIndex}>
-            <StepFrame
-              step={step}
-              stepIndex={stepIndex}
-              totalSteps={steps.length}
-            />
-          </Series.Sequence>
-        ))}
-      </Series>
+      {safeSteps.map((step, stepIndex) => (
+        <Sequence
+          key={stepIndex}
+          from={stepIndex * FRAMES_PER_STEP}
+          durationInFrames={FRAMES_PER_STEP}
+        >
+          <StepFrame
+            step={step}
+            stepIndex={stepIndex}
+            totalSteps={safeSteps.length}
+          />
+        </Sequence>
+      ))}
     </AbsoluteFill>
   );
 };
