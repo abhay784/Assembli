@@ -331,22 +331,15 @@ export function createWorker(processor: Parameters<typeof Worker>[1]) {
 
 **If this table were empty:** All claims would be verified or cited — the three above remain assumptions pending BullMQ/Next deploy doc cross-check.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Exact max PDF bytes for INGEST-02**
-   - What we know: INGEST-02 requires size validation; CONTEXT deferred numeric limit.
-   - What’s unclear: concrete MB cap and whether server enforces only at presign time or also via S3 policy.
-   - Recommendation: Pick a demo default (e.g. 10–25 MB) in PLAN.md; document in UI copy.
+Planning closed these for Phase 1 execution (see `01-UI-SPEC.md`, `01-05-PLAN.md`, `01-06-PLAN.md`).
 
-2. **Next.js / hosting body limits for non-upload JSON routes**
-   - What we know: Large files must not use route body; small JSON for job creation is fine.
-   - What’s unclear: Exact default limits on chosen host (Vercel vs Node).
-   - Recommendation: Keep job `POST` bodies tiny (metadata only); verify host docs during deploy task.
+1. **Exact max PDF bytes for INGEST-02** — **RESOLVED:** **25 MB** (`26_214_400` bytes) demo default; enforced client-side (react-dropzone + UI copy) and server-side at presign (`01-05`); S3 bucket policy optional hardening deferred.
 
-3. **Local S3 (MinIO) vs real AWS in dev**
-   - What we know: CONTEXT deferred local object storage.
-   - What’s unclear: Whether team wants MinIO for offline dev.
-   - Recommendation: PLAN.md lists env vars for endpoint override (S3-compatible) optional task.
+2. **Next.js / hosting body limits for non-upload JSON routes** — **RESOLVED:** Job creation stays **metadata-only JSON** (no PDF in route body); presigned browser PUT carries the binary. Re-verify host limits only at deploy if adding larger JSON payloads.
+
+3. **Local S3 (MinIO) vs real AWS in dev** — **RESOLVED:** **Optional** S3-compatible endpoint via standard AWS SDK env overrides (`AWS_ENDPOINT_URL` / region + credentials pattern per `01-05` implementation); MinIO not required for Phase 1 plans.
 
 ## Environment Availability
 
