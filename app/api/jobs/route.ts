@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
 import { z } from "zod";
-import { getJobQueue } from "@/lib/queue";
 import {
   UploadValidationError,
   validateUploadRequest,
@@ -35,7 +34,7 @@ export async function POST(request: Request) {
     throw error;
   }
 
-  const { contentType, sizeBytes } = parsed.data;
+  const { contentType } = parsed.data;
   const jobId = uuidv4();
   const key = buildManualPdfKey(jobId);
 
@@ -48,20 +47,6 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json(
       { error: "Could not prepare upload." },
-      { status: 500 },
-    );
-  }
-
-  try {
-    const queue = getJobQueue();
-    await queue.add(
-      jobId,
-      { jobId, s3Key: key, contentType, sizeBytes },
-      { jobId },
-    );
-  } catch {
-    return NextResponse.json(
-      { error: "Could not enqueue job." },
       { status: 500 },
     );
   }

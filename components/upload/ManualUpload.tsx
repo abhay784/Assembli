@@ -45,6 +45,8 @@ const COPY = {
     "We could not start the upload. Check your connection and try again.",
   errS3:
     "Upload failed before finishing. Check your connection and try again.",
+  errEnqueue:
+    "Upload finished but processing could not be started. Check your connection and try again.",
   successTitle: "Manual received.",
   successBody: "Your manual is uploaded. Processing status updates below.",
   discardTitle: "Discard this PDF?",
@@ -278,6 +280,35 @@ export function ManualUpload() {
         session.headers,
         setProgress,
       );
+
+      const enqueueResponse = await fetch(
+        `/api/jobs/${session.jobId}/enqueue`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contentType: file.type || "application/pdf",
+            sizeBytes: file.size,
+          }),
+        },
+      );
+
+      const enqueuePayload = (await enqueueResponse.json()) as
+        | { ok?: boolean; jobId?: string }
+        | { error?: string };
+
+      if (!enqueueResponse.ok) {
+        const apiError =
+          "error" in enqueuePayload && typeof enqueuePayload.error === "string"
+            ? enqueuePayload.error
+            : "";
+        const devHint =
+          process.env.NODE_ENV === "development" && apiError
+            ? `\n\nDetails: ${apiError}`
+            : "";
+        setErrorMessage(`${COPY.errEnqueue}${devHint}`);
+        return;
+      }
 
       setSuccessJobId(session.jobId);
       setFile(null);

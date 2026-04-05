@@ -1,10 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GET } from "./[id]/route";
+import { POST as POSTEnqueue } from "./[id]/enqueue/route";
 import { POST } from "./route";
 import { getJobQueue } from "@/lib/queue";
+import { objectExistsInBucket } from "@/lib/s3/head-object";
 
 vi.mock("@/lib/queue", () => ({
   getJobQueue: vi.fn(),
+}));
+
+vi.mock("@/lib/s3/head-object", () => ({
+  objectExistsInBucket: vi.fn(),
 }));
 
 vi.mock("@/lib/s3/presign", () => ({
@@ -17,9 +23,6 @@ vi.mock("@/lib/s3/presign", () => ({
 describe("POST /api/jobs", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getJobQueue).mockReturnValue({
-      add: vi.fn().mockResolvedValue(undefined),
-    } as never);
   });
 
   it("returns presigned upload metadata for valid PDF requests", async () => {
@@ -48,7 +51,7 @@ describe("POST /api/jobs", () => {
     expect(body.key).toBe(`uploads/${body.jobId}/manual.pdf`);
     expect(body.headers["Content-Type"]).toBe("application/pdf");
     expect(body.expiresIn).toBe(900);
-    expect(vi.mocked(getJobQueue).mock.results[0]?.value.add).toHaveBeenCalled();
+    expect(getJobQueue).not.toHaveBeenCalled();
   });
 
   it("returns 400 for oversize declarations", async () => {
@@ -63,6 +66,74 @@ describe("POST /api/jobs", () => {
 
     const response = await POST(request);
     expect(response.status).toBe(400);
+  });
+});
+
+describe("POST /api/jobs/[id]/enqueue", () => {
+  const jobId = "550e8400-e29b-41d4-a716-446655440000";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(objectExistsInBucket).mockResolvedValue(true);
+    vi.mocked(getJobQueue).mockReturnValue({
+      add: vi.fn().mockResolvedValue(undefined),
+    } as never);
+  });
+
+  it("enqueues after confirming the PDF exists in S3", async () => {
+    const request = new Request(
+      `http://localhost/api/jobs/${jobId}/enqueue`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contentType: "application/pdf",
+          sizeBytes: 1200,
+        }),
+      },
+    );
+
+    const response = await POSTEnqueue(request, {
+      params: Promise.resolve({ id: jobId }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(objectExistsInBucket).toHaveBeenCalledWith(
+      `uploads/${jobId}/manual.pdf`,
+    );
+    expect(vi.mocked(getJobQueue).mock.results[0]?.value.add).toHaveBeenCalledWith(
+      jobId,
+      {
+        jobId,
+        s3Key: `uploads/${jobId}/manual.pdf`,
+        contentType: "application/pdf",
+        sizeBytes: 1200,
+      },
+      { jobId },
+    );
+  });
+
+  it("returns 409 when the object is not in S3 yet", async () => {
+    vi.mocked(objectExistsInBucket).mockResolvedValue(false);
+
+    const request = new Request(
+      `http://localhost/api/jobs/${jobId}/enqueue`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contentType: "application/pdf",
+          sizeBytes: 1200,
+        }),
+      },
+    );
+
+    const response = await POSTEnqueue(request, {
+      params: Promise.resolve({ id: jobId }),
+    });
+
+    expect(response.status).toBe(409);
+    expect(getJobQueue).not.toHaveBeenCalled();
   });
 });
 
