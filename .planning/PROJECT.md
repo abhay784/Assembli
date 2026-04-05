@@ -13,6 +13,7 @@ Upload a furniture assembly manual, get back a clear, watchable explainer video 
 ### Validated
 
 - Phase 2 (2026-04-04): Claude-backed PDF → Zod-validated SceneJSON pipeline in worker (human UAT pending for real manual).
+- Phase 4 (2026-04-05): Job status API exposes presigned `videoUrl` when `videoKey` is present; home UI shows pipeline progress, HTML5 player, and failure states per OUTPUT-01 (full MP4 path still depends on Phase 3).
 
 ### Active
 
@@ -25,7 +26,7 @@ Upload a furniture assembly manual, get back a clear, watchable explainer video 
 - [ ] System renders final video with animations, captions, and voiceover synced together
 - [ ] Animations are simple exploded-view style (parts moving together, not 3D)
 - [ ] Output is a short (1-3 min) video with one step per slide
-- [ ] User can download or view the completed video
+- [x] User can download or view the completed video — presigned playback URL + in-app player when worker supplies `videoKey` (Phase 4); render still Phase 3
 
 ### Out of Scope
 
@@ -84,4 +85,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-04 after Phase 2 (LLM Extraction) implementation*
+*Last updated: 2026-04-05 after Phase 4 (Pipeline Integration and Output) implementation*

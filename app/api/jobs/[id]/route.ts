@@ -1,13 +1,42 @@
 import { NextResponse } from "next/server";
 import { getJobQueue } from "@/lib/queue";
+import { presignVideoGet } from "@/lib/s3/presign-get";
 
 export type JobStatus = "queued" | "processing" | "completed" | "failed";
+
+/**
+ * JSON shape for GET /api/jobs/[id]. `stages` is null until the backend exposes granular stages.
+ */
+export type JobStatusResponse = {
+  id: string | number;
+  status: JobStatus;
+  error: string | null;
+  updatedAt: string;
+  sceneKey: string | null;
+  videoUrl: string | null;
+  stages: null;
+};
 
 function mapBullState(state: string): JobStatus {
   if (state === "active") return "processing";
   if (state === "completed") return "completed";
   if (state === "failed") return "failed";
   return "queued";
+}
+
+function isValidVideoKeyForJob(jobId: string, videoKey: string): boolean {
+  const prefix = `uploads/${jobId}/`;
+  if (!videoKey.startsWith(prefix)) return false;
+  const remainder = videoKey.slice(prefix.length);
+  if (
+    !remainder ||
+    remainder.startsWith("/") ||
+    remainder.includes("..") ||
+    remainder.includes("\\")
+  ) {
+    return false;
+  }
+  return true;
 }
 
 export async function GET(
@@ -49,11 +78,38 @@ export async function GET(
       ? (returnvalue as { sceneKey: string }).sceneKey
       : null;
 
-  return NextResponse.json({
-    id: job.id,
+  let videoUrl: string | null = null;
+  if (status === "completed") {
+    if (
+      returnvalue !== null &&
+      typeof returnvalue === "object" &&
+      "videoKey" in returnvalue &&
+      typeof (returnvalue as { videoKey: unknown }).videoKey === "string"
+    ) {
+      const rawKey = (returnvalue as { videoKey: string }).videoKey;
+      if (isValidVideoKeyForJob(String(job.id ?? id), rawKey)) {
+        try {
+          const signed = await presignVideoGet({ key: rawKey });
+          videoUrl = signed.url;
+        } catch (err) {
+          console.error("presignVideoGet failed", err);
+          videoUrl = null;
+        }
+      } else {
+        console.warn("Invalid videoKey for job", job.id);
+      }
+    }
+  }
+
+  const body: JobStatusResponse = {
+    id: job.id ?? id,
     status,
     error,
     updatedAt,
     sceneKey,
-  });
+    videoUrl,
+    stages: null,
+  };
+
+  return NextResponse.json(body);
 }

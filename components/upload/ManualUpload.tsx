@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useDropzone, type FileRejection } from "react-dropzone";
 import { AlertCircle, CheckCircle2, FileText, Loader2 } from "lucide-react";
+import { PipelineStatus } from "@/components/pipeline/PipelineStatus";
+import { VideoResult } from "@/components/pipeline/VideoResult";
 import { MAX_PDF_BYTES } from "@/lib/constants/upload";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
@@ -28,6 +30,14 @@ import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 import { isLikelyPdf } from "./magic-pdf";
 
+type JobStatusPayload = {
+  status: "queued" | "processing" | "completed" | "failed";
+  error: string | null;
+  sceneKey: string | null;
+  videoUrl: string | null;
+  stages: null;
+};
+
 const COPY = {
   primaryCta: "Upload assembly manual",
   primaryUploading: "Uploading…",
@@ -48,17 +58,13 @@ const COPY = {
   errEnqueue:
     "Upload finished but processing could not be started. Check your connection and try again.",
   successTitle: "Manual received.",
-  successBody: "Your manual is uploaded. Processing status updates below.",
   discardTitle: "Discard this PDF?",
   discardDescriptionPrefix: "Discard selected file:",
   discardDescriptionRest: "You can choose a different file afterward.",
   discardConfirm: "Discard PDF",
   discardCancel: "Keep file",
-  statusQueued: "Queued — waiting for the worker to start…",
-  statusProcessing: "Processing — extracting steps with Claude…",
-  statusCompleted: "Done — scene JSON saved to storage.",
-  statusFailed: "Job failed",
   statusPollError: "Could not load job status. Is the dev server running?",
+  checkingStatus: "Checking status…",
 } as const;
 
 function formatBytes(bytes: number): string {
@@ -100,6 +106,7 @@ function putFileWithProgress(
 export function ManualUpload() {
   const inputId = useId();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const videoSectionRef = useRef<HTMLDivElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successJobId, setSuccessJobId] = useState<string | null>(null);
@@ -111,6 +118,8 @@ export function ManualUpload() {
   >(null);
   const [jobError, setJobError] = useState<string | null>(null);
   const [sceneKey, setSceneKey] = useState<string | null>(null);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [stages, setStages] = useState<JobStatusPayload["stages"]>(null);
   const [statusPollError, setStatusPollError] = useState<string | null>(null);
 
   const onDropAccepted = (accepted: File[]) => {
@@ -122,6 +131,8 @@ export function ManualUpload() {
     setJobStatus(null);
     setJobError(null);
     setSceneKey(null);
+    setVideoUrl(null);
+    setStages(null);
     setStatusPollError(null);
   };
 
@@ -136,6 +147,8 @@ export function ManualUpload() {
     setJobStatus(null);
     setJobError(null);
     setSceneKey(null);
+    setVideoUrl(null);
+    setStages(null);
     setStatusPollError(null);
   };
 
@@ -151,11 +164,39 @@ export function ManualUpload() {
 
   const pollIntervalRef = useRef<number | null>(null);
 
+  const fetchJobStatus = useCallback(async () => {
+    if (!successJobId) return;
+    try {
+      const res = await fetch(`/api/jobs/${successJobId}`);
+      if (!res.ok) {
+        setStatusPollError(COPY.statusPollError);
+        return;
+      }
+      const body = (await res.json()) as JobStatusPayload;
+      setStatusPollError(null);
+      setJobStatus(body.status);
+      setJobError(body.error);
+      setSceneKey(body.sceneKey);
+      setVideoUrl(body.videoUrl);
+      setStages(body.stages);
+      if (body.status === "completed" || body.status === "failed") {
+        if (pollIntervalRef.current !== null) {
+          window.clearInterval(pollIntervalRef.current);
+          pollIntervalRef.current = null;
+        }
+      }
+    } catch {
+      setStatusPollError(COPY.statusPollError);
+    }
+  }, [successJobId]);
+
   useEffect(() => {
     if (!successJobId) {
       setJobStatus(null);
       setJobError(null);
       setSceneKey(null);
+      setVideoUrl(null);
+      setStages(null);
       setStatusPollError(null);
       return;
     }
@@ -169,32 +210,8 @@ export function ManualUpload() {
     };
 
     const tick = async () => {
-      try {
-        const res = await fetch(`/api/jobs/${successJobId}`);
-        if (!res.ok) {
-          if (!cancelled) {
-            setStatusPollError(COPY.statusPollError);
-          }
-          return;
-        }
-        const body = (await res.json()) as {
-          status: "queued" | "processing" | "completed" | "failed";
-          error: string | null;
-          sceneKey: string | null;
-        };
-        if (cancelled) return;
-        setStatusPollError(null);
-        setJobStatus(body.status);
-        setJobError(body.error);
-        setSceneKey(body.sceneKey);
-        if (body.status === "completed" || body.status === "failed") {
-          clearPoll();
-        }
-      } catch {
-        if (!cancelled) {
-          setStatusPollError(COPY.statusPollError);
-        }
-      }
+      if (cancelled) return;
+      await fetchJobStatus();
     };
 
     void tick();
@@ -203,7 +220,24 @@ export function ManualUpload() {
       cancelled = true;
       clearPoll();
     };
-  }, [successJobId]);
+  }, [successJobId, fetchJobStatus]);
+
+  useEffect(() => {
+    if (jobStatus !== "completed" || !videoUrl) return;
+    const raf = requestAnimationFrame(() => {
+      videoSectionRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+      });
+      setTimeout(() => {
+        const el = videoSectionRef.current?.querySelector("video");
+        if (el instanceof HTMLVideoElement) {
+          el.focus();
+        }
+      }, 0);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [jobStatus, videoUrl]);
 
   const openFilePicker = () => {
     fileInputRef.current?.click();
@@ -231,6 +265,8 @@ export function ManualUpload() {
     setJobStatus(null);
     setJobError(null);
     setSceneKey(null);
+    setVideoUrl(null);
+    setStages(null);
     setStatusPollError(null);
     setUploading(true);
     setProgress(0);
@@ -322,172 +358,212 @@ export function ManualUpload() {
 
   return (
     <div className="flex flex-col gap-4">
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-xl font-semibold leading-[1.2]">
-            {COPY.emptyHeading}
-          </CardTitle>
-          <CardDescription className="text-base leading-normal">
-            {COPY.emptyBody}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div
-            {...getRootProps({
-              "data-testid": "manual-dropzone",
-              className: cn(
-                "flex min-h-[200px] flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed px-4 py-8 text-center transition-colors",
-                isDragActive
-                  ? "border-neutral-900 bg-slate-100"
-                  : "border-slate-300 bg-white",
-                uploading && "pointer-events-none opacity-60",
-              ),
-            })}
-          >
-            <input {...getInputProps({ id: inputId })} />
-            <FileText
-              className="size-8 text-muted-foreground"
-              aria-hidden
-            />
-            <p className="text-base leading-normal text-muted-foreground">
-              {isDragActive
-                ? "Release to add your manual."
-                : "Drag your PDF here, then upload when ready."}
-            </p>
-          </div>
+      <div className="mx-auto w-full max-w-[640px]">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-xl font-semibold leading-[1.2]">
+              {COPY.emptyHeading}
+            </CardTitle>
+            <CardDescription className="text-base leading-normal">
+              {COPY.emptyBody}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div
+              {...getRootProps({
+                "data-testid": "manual-dropzone",
+                className: cn(
+                  "flex min-h-[200px] flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed px-4 py-8 text-center transition-colors",
+                  isDragActive
+                    ? "border-neutral-900 bg-slate-100"
+                    : "border-slate-300 bg-white",
+                  uploading && "pointer-events-none opacity-60",
+                ),
+              })}
+            >
+              <input {...getInputProps({ id: inputId })} />
+              <FileText
+                className="size-8 text-muted-foreground"
+                aria-hidden
+              />
+              <p className="text-base leading-normal text-muted-foreground">
+                {isDragActive
+                  ? "Release to add your manual."
+                  : "Drag your PDF here, then upload when ready."}
+              </p>
+            </div>
 
-          <input
-            ref={fileInputRef}
-            data-testid="manual-file-input"
-            type="file"
-            accept="application/pdf,.pdf"
-            className="hidden"
-            onChange={(event) => {
-              const next = event.target.files?.[0];
-              if (next) {
-                if (next.size > MAX_PDF_BYTES) {
-                  setErrorMessage(COPY.errOversize);
-                } else if (next.type && next.type !== "application/pdf") {
-                  setErrorMessage(COPY.errWrongType);
-                } else {
-                  setFile(next);
-                  setErrorMessage(null);
-                  setSuccessJobId(null);
-                  setJobStatus(null);
-                  setJobError(null);
-                  setSceneKey(null);
-                  setStatusPollError(null);
+            <input
+              ref={fileInputRef}
+              data-testid="manual-file-input"
+              type="file"
+              accept="application/pdf,.pdf"
+              className="hidden"
+              onChange={(event) => {
+                const next = event.target.files?.[0];
+                if (next) {
+                  if (next.size > MAX_PDF_BYTES) {
+                    setErrorMessage(COPY.errOversize);
+                  } else if (next.type && next.type !== "application/pdf") {
+                    setErrorMessage(COPY.errWrongType);
+                  } else {
+                    setFile(next);
+                    setErrorMessage(null);
+                    setSuccessJobId(null);
+                    setJobStatus(null);
+                    setJobError(null);
+                    setSceneKey(null);
+                    setVideoUrl(null);
+                    setStages(null);
+                    setStatusPollError(null);
+                  }
                 }
-              }
-              event.target.value = "";
-            }}
-          />
+                event.target.value = "";
+              }}
+            />
 
-          {file ? (
-            <div className="space-y-2 rounded-lg border border-border bg-card p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-sm font-semibold leading-[1.4]">
-                    {file.name}
-                  </p>
-                  <p className="text-base leading-normal text-muted-foreground">
-                    {formatBytes(file.size)}
-                  </p>
+            {file ? (
+              <div className="space-y-2 rounded-lg border border-border bg-card p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold leading-[1.4]">
+                      {file.name}
+                    </p>
+                    <p className="text-base leading-normal text-muted-foreground">
+                      {formatBytes(file.size)}
+                    </p>
+                  </div>
                 </div>
               </div>
-            </div>
-          ) : null}
+            ) : null}
 
-          {uploading ? (
-            <div className="space-y-2">
-              <Progress value={progress} className="w-full" />
-              <p className="text-sm text-muted-foreground">{COPY.primaryUploading}</p>
-            </div>
-          ) : null}
-        </CardContent>
-        <CardFooter className="flex flex-col gap-3 sm:flex-row sm:justify-end">
-          <Button
-            type="button"
-            variant="outline"
-            className="min-h-11 w-full sm:w-auto"
-            onClick={handleChooseClick}
-            disabled={uploading}
-          >
-            {COPY.secondary}
-          </Button>
-          <Button
-            type="button"
-            className="min-h-11 w-full sm:w-auto"
-            onClick={handleUpload}
-            disabled={!file || uploading}
-          >
             {uploading ? (
-              <span className="inline-flex items-center gap-2">
-                <Loader2 className="size-4 animate-spin" aria-hidden />
-                {COPY.primaryUploading}
-              </span>
-            ) : (
-              COPY.primaryCta
-            )}
-          </Button>
-        </CardFooter>
-      </Card>
+              <div className="space-y-2">
+                <Progress value={progress} className="w-full" />
+                <p className="text-sm text-muted-foreground">
+                  {COPY.primaryUploading}
+                </p>
+              </div>
+            ) : null}
+          </CardContent>
+          <CardFooter className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              className="min-h-11 w-full sm:w-auto"
+              onClick={handleChooseClick}
+              disabled={uploading}
+            >
+              {COPY.secondary}
+            </Button>
+            <Button
+              type="button"
+              className="min-h-11 w-full sm:w-auto"
+              onClick={handleUpload}
+              disabled={!file || uploading}
+            >
+              {uploading ? (
+                <span className="inline-flex items-center gap-2">
+                  <Loader2 className="size-4 animate-spin" aria-hidden />
+                  {COPY.primaryUploading}
+                </span>
+              ) : (
+                COPY.primaryCta
+              )}
+            </Button>
+          </CardFooter>
+        </Card>
+      </div>
 
       {errorMessage ? (
-        <Alert variant="destructive">
-          <AlertCircle className="size-4" />
-          <AlertTitle>Error</AlertTitle>
-          <AlertDescription className="whitespace-pre-line">
-            {errorMessage}
-          </AlertDescription>
-        </Alert>
+        <div className="mx-auto w-full max-w-[640px]">
+          <Alert variant="destructive">
+            <AlertCircle className="size-4" />
+            <AlertTitle>Error</AlertTitle>
+            <AlertDescription className="whitespace-pre-line">
+              {errorMessage}
+            </AlertDescription>
+          </Alert>
+        </div>
       ) : null}
 
       {successJobId ? (
-        <Alert>
-          <CheckCircle2 className="size-4 text-primary" />
-          <AlertTitle>{COPY.successTitle}</AlertTitle>
-          <AlertDescription className="space-y-2">
-            <p>{COPY.successBody}</p>
-            <p className="font-mono text-xs text-muted-foreground">
-              Job id: {successJobId}
-            </p>
-            {statusPollError ? (
-              <p className="text-sm text-amber-800 dark:text-amber-200">
-                {statusPollError}
+        <div className="mx-auto flex w-full max-w-[960px] flex-col gap-8">
+          <Alert>
+            <CheckCircle2 className="size-4 text-primary" />
+            <AlertTitle>{COPY.successTitle}</AlertTitle>
+            <AlertDescription>
+              <p className="font-mono text-xs text-muted-foreground">
+                Job id: {successJobId}
               </p>
-            ) : null}
-            {jobStatus ? (
-              <div className="space-y-1 text-sm">
-                <p className="font-medium">
-                  {jobStatus === "queued"
-                    ? COPY.statusQueued
-                    : jobStatus === "processing"
-                      ? COPY.statusProcessing
-                      : jobStatus === "completed"
-                        ? COPY.statusCompleted
-                        : COPY.statusFailed}
+              {statusPollError ? (
+                <p className="mt-2 text-sm text-amber-800 dark:text-amber-200">
+                  {statusPollError}
                 </p>
-                {jobStatus === "failed" && jobError ? (
-                  <p className="text-destructive">{jobError}</p>
-                ) : null}
-                {jobStatus === "completed" && sceneKey ? (
-                  <p className="break-all font-mono text-xs text-muted-foreground">
-                    {sceneKey}
-                  </p>
-                ) : null}
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                <Loader2
-                  className="mr-1 inline size-3.5 animate-spin align-middle"
-                  aria-hidden
-                />
-                Checking status…
-              </p>
-            )}
-          </AlertDescription>
-        </Alert>
+              ) : null}
+            </AlertDescription>
+          </Alert>
+
+          {statusPollError && !jobStatus ? (
+            <div className="flex flex-wrap items-center gap-3">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void fetchJobStatus()}
+              >
+                Retry status
+              </Button>
+            </div>
+          ) : null}
+
+          {jobStatus ? (
+            <>
+              <PipelineStatus stages={stages} coarseStatus={jobStatus} />
+
+              {jobStatus === "failed" ? (
+                <Alert variant="destructive">
+                  <AlertCircle className="size-4" />
+                  <AlertTitle>We couldn&apos;t finish the video.</AlertTitle>
+                  <AlertDescription className="space-y-3">
+                    {jobError ? (
+                      <p className="whitespace-pre-line">{jobError}</p>
+                    ) : null}
+                    <p className="font-medium">
+                      Try uploading again or choose another manual.
+                    </p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => void fetchJobStatus()}
+                    >
+                      Retry status
+                    </Button>
+                  </AlertDescription>
+                </Alert>
+              ) : null}
+
+              <VideoResult
+                ref={videoSectionRef}
+                videoUrl={videoUrl}
+                jobCompleted={jobStatus === "completed"}
+              />
+
+              {jobStatus === "completed" && sceneKey ? (
+                <p className="break-all font-mono text-xs text-muted-foreground">
+                  {sceneKey}
+                </p>
+              ) : null}
+            </>
+          ) : !statusPollError ? (
+            <p className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2
+                className="size-3.5 animate-spin"
+                aria-hidden
+              />
+              {COPY.checkingStatus}
+            </p>
+          ) : null}
+        </div>
       ) : null}
 
       <AlertDialog open={discardOpen} onOpenChange={setDiscardOpen}>

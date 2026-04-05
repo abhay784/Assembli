@@ -20,6 +20,16 @@ vi.mock("@/lib/s3/presign", () => ({
   ),
 }));
 
+const { presignVideoGetMock } = vi.hoisted(() => ({
+  presignVideoGetMock: vi.fn(() =>
+    Promise.resolve({ url: "https://signed.example/video", expiresIn: 900 }),
+  ),
+}));
+
+vi.mock("@/lib/s3/presign-get", () => ({
+  presignVideoGet: presignVideoGetMock,
+}));
+
 describe("POST /api/jobs", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -140,6 +150,9 @@ describe("POST /api/jobs/[id]/enqueue", () => {
 describe("GET /api/jobs/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    presignVideoGetMock.mockImplementation(() =>
+      Promise.resolve({ url: "https://signed.example/video", expiresIn: 900 }),
+    );
   });
 
   it("returns queued for waiting jobs", async () => {
@@ -166,10 +179,14 @@ describe("GET /api/jobs/[id]", () => {
       status: string;
       error: string | null;
       sceneKey: string | null;
+      videoUrl: string | null;
+      stages: null;
     };
     expect(body.status).toBe("queued");
     expect(body.error).toBeNull();
     expect(body.sceneKey).toBeNull();
+    expect(body.videoUrl).toBeNull();
+    expect(body.stages).toBeNull();
   });
 
   it("returns processing for active jobs", async () => {
@@ -195,9 +212,13 @@ describe("GET /api/jobs/[id]", () => {
     const body = (await response.json()) as {
       status: string;
       sceneKey: string | null;
+      videoUrl: string | null;
+      stages: null;
     };
     expect(body.status).toBe("processing");
     expect(body.sceneKey).toBeNull();
+    expect(body.videoUrl).toBeNull();
+    expect(body.stages).toBeNull();
   });
 
   it("returns sceneKey when job completed with return value", async () => {
@@ -224,9 +245,13 @@ describe("GET /api/jobs/[id]", () => {
     const body = (await response.json()) as {
       status: string;
       sceneKey: string | null;
+      videoUrl: string | null;
+      stages: null;
     };
     expect(body.status).toBe("completed");
     expect(body.sceneKey).toBe("uploads/job-done/scene.json");
+    expect(body.videoUrl).toBeNull();
+    expect(body.stages).toBeNull();
   });
 
   it("returns sceneKey null when completed without return value", async () => {
@@ -250,8 +275,85 @@ describe("GET /api/jobs/[id]", () => {
     );
 
     expect(response.status).toBe(200);
-    const body = (await response.json()) as { sceneKey: string | null };
+    const body = (await response.json()) as {
+      sceneKey: string | null;
+      videoUrl: string | null;
+      stages: null;
+    };
     expect(body.sceneKey).toBeNull();
+    expect(body.videoUrl).toBeNull();
+    expect(body.stages).toBeNull();
+  });
+
+  it("returns presigned videoUrl when completed with valid videoKey", async () => {
+    vi.mocked(getJobQueue).mockReturnValue({
+      getJob: vi.fn(() =>
+        Promise.resolve({
+          id: "x",
+          timestamp: 1,
+          processedOn: 2,
+          finishedOn: 3,
+          failedReason: undefined,
+          returnvalue: {
+            sceneKey: "uploads/x/scene.json",
+            videoKey: "uploads/x/output.mp4",
+          },
+          getState: vi.fn(() => Promise.resolve("completed")),
+        }),
+      ),
+    } as never);
+
+    const response = await GET(new Request("http://localhost/api/jobs/x"), {
+      params: Promise.resolve({ id: "x" }),
+    });
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      status: string;
+      sceneKey: string | null;
+      videoUrl: string | null;
+      stages: null;
+    };
+    expect(body.status).toBe("completed");
+    expect(body.sceneKey).toBe("uploads/x/scene.json");
+    expect(body.videoUrl).toContain("signed.example");
+    expect(body.stages).toBeNull();
+    expect(presignVideoGetMock).toHaveBeenCalledWith({
+      key: "uploads/x/output.mp4",
+    });
+  });
+
+  it("returns videoUrl null when videoKey prefix does not match job id", async () => {
+    vi.mocked(getJobQueue).mockReturnValue({
+      getJob: vi.fn(() =>
+        Promise.resolve({
+          id: "job-done",
+          timestamp: 1,
+          processedOn: 2,
+          finishedOn: 3,
+          failedReason: undefined,
+          returnvalue: {
+            sceneKey: "uploads/job-done/scene.json",
+            videoKey: "uploads/other/output.mp4",
+          },
+          getState: vi.fn(() => Promise.resolve("completed")),
+        }),
+      ),
+    } as never);
+
+    const response = await GET(
+      new Request("http://localhost/api/jobs/job-done"),
+      { params: Promise.resolve({ id: "job-done" }) },
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      videoUrl: string | null;
+      stages: null;
+    };
+    expect(body.videoUrl).toBeNull();
+    expect(body.stages).toBeNull();
+    expect(presignVideoGetMock).not.toHaveBeenCalled();
   });
 
   it("returns 404 when the job is missing", async () => {
