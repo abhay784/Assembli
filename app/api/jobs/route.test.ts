@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GET } from "./[id]/route";
+import { GET as GETVideoUrl } from "./[id]/video-url/route";
 import { POST as POSTEnqueue } from "./[id]/enqueue/route";
 import { POST } from "./route";
 import { getJobQueue } from "@/lib/queue";
@@ -17,6 +18,9 @@ vi.mock("@/lib/s3/presign", () => ({
   buildManualPdfKey: (jobId: string) => `uploads/${jobId}/manual.pdf`,
   presignManualUpload: vi.fn(() =>
     Promise.resolve({ url: "https://signed.example/upload", expiresIn: 900 }),
+  ),
+  presignVideoDownload: vi.fn(() =>
+    Promise.resolve("https://signed.example/video.mp4"),
   ),
 }));
 
@@ -307,5 +311,96 @@ describe("GET /api/jobs/[id]", () => {
     );
 
     expect(response.status).toBe(404);
+  });
+});
+
+describe("GET /api/jobs/[id]/video-url", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns { url, expiresIn: 900 } for completed job with videoKey", async () => {
+    vi.mocked(getJobQueue).mockReturnValue({
+      getJob: vi.fn(() =>
+        Promise.resolve({
+          id: "job-v",
+          returnvalue: {
+            sceneKey: "uploads/job-v/scene.json",
+            videoKey: "uploads/job-v/output.mp4",
+          },
+          getState: vi.fn(() => Promise.resolve("completed")),
+        }),
+      ),
+    } as never);
+
+    const response = await GETVideoUrl(
+      new Request("http://localhost/api/jobs/job-v/video-url"),
+      { params: Promise.resolve({ id: "job-v" }) },
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { url: string; expiresIn: number };
+    expect(body.url).toBe("https://signed.example/video.mp4");
+    expect(body.expiresIn).toBe(900);
+  });
+
+  it("returns 409 for non-completed (active) job", async () => {
+    vi.mocked(getJobQueue).mockReturnValue({
+      getJob: vi.fn(() =>
+        Promise.resolve({
+          id: "job-active",
+          returnvalue: undefined,
+          getState: vi.fn(() => Promise.resolve("active")),
+        }),
+      ),
+    } as never);
+
+    const response = await GETVideoUrl(
+      new Request("http://localhost/api/jobs/job-active/video-url"),
+      { params: Promise.resolve({ id: "job-active" }) },
+    );
+
+    expect(response.status).toBe(409);
+  });
+
+  it("returns 404 for missing job", async () => {
+    vi.mocked(getJobQueue).mockReturnValue({
+      getJob: vi.fn(() => Promise.resolve(undefined)),
+    } as never);
+
+    const response = await GETVideoUrl(
+      new Request("http://localhost/api/jobs/no-exist/video-url"),
+      { params: Promise.resolve({ id: "no-exist" }) },
+    );
+
+    expect(response.status).toBe(404);
+  });
+
+  it("returns 404 for completed job without videoKey", async () => {
+    vi.mocked(getJobQueue).mockReturnValue({
+      getJob: vi.fn(() =>
+        Promise.resolve({
+          id: "job-no-video",
+          returnvalue: { sceneKey: "uploads/job-no-video/scene.json" },
+          getState: vi.fn(() => Promise.resolve("completed")),
+        }),
+      ),
+    } as never);
+
+    const response = await GETVideoUrl(
+      new Request("http://localhost/api/jobs/job-no-video/video-url"),
+      { params: Promise.resolve({ id: "job-no-video" }) },
+    );
+
+    expect(response.status).toBe(404);
+  });
+
+  it("returns 400 for path-traversal id", async () => {
+    const response = await GETVideoUrl(
+      new Request("http://localhost/api/jobs/../evil/video-url"),
+      { params: Promise.resolve({ id: "../evil" }) },
+    );
+
+    expect(response.status).toBe(400);
   });
 });
