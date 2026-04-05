@@ -1,4 +1,4 @@
-import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 export function buildManualPdfKey(jobId: string): string {
@@ -45,4 +45,17 @@ export async function presignManualUpload(options: {
   const expiresIn = 900;
   const url = await getSignedUrl(client, command, { expiresIn });
   return { url, expiresIn };
+}
+
+export async function presignVideoDownload(options: {
+  key: string;
+  expiresIn?: number;
+}): Promise<string> {
+  const bucket = process.env.S3_BUCKET;
+  if (!bucket) throw new Error("S3_BUCKET is not set");
+  const client = getS3Client();
+  const command = new GetObjectCommand({ Bucket: bucket, Key: options.key });
+  return getSignedUrl(client, command, {
+    expiresIn: options.expiresIn ?? 900,
+  });
 }
