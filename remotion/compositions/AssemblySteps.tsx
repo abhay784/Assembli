@@ -10,8 +10,8 @@ import {
 import type { RenderInput } from "../../lib/render/schema";
 
 // ─── Isometric projection ────────────────────────────────────────────────────
-const ISO_DX = 0.55; // depth → horizontal offset
-const ISO_DY = 0.28; // depth → vertical offset (up)
+const ISO_DX = 0.55;
+const ISO_DY = 0.28;
 
 // ─── Material color palettes ─────────────────────────────────────────────────
 const MATERIALS = {
@@ -40,7 +40,6 @@ const MATERIALS = {
 
 type MaterialKey = keyof typeof MATERIALS;
 
-// ─── Default dimensions per shape ────────────────────────────────────────────
 const SHAPE_DEFAULTS = {
   panel: { w: 200, h: 14, d: 90 },
   leg: { w: 24, h: 110, d: 24 },
@@ -54,6 +53,9 @@ type ShapeKey = keyof typeof SHAPE_DEFAULTS;
 const FPS = 30;
 const CANVAS_W = 1000;
 const CANVAS_H = 500;
+
+type PartType = RenderInput["steps"][number]["parts"][number];
+type StepType = RenderInput["steps"][number];
 
 // ─── Inference helpers ───────────────────────────────────────────────────────
 function inferShape(label: string): ShapeKey {
@@ -74,34 +76,25 @@ function inferMaterial(label: string, shape: ShapeKey): MaterialKey {
 }
 
 // ─── Isometric box vertex calculator ─────────────────────────────────────────
-function isoVertices(
-  cx: number,
-  cy: number,
-  w: number,
-  h: number,
-  d: number,
-) {
+function isoVertices(cx: number, cy: number, w: number, h: number, d: number) {
   const hw = w / 2;
   const hh = h / 2;
   const dx = d * ISO_DX;
   const dy = d * ISO_DY;
 
   return {
-    // Front face (rectangle — most visible)
     front: [
       [cx - hw, cy - hh],
       [cx + hw, cy - hh],
       [cx + hw, cy + hh],
       [cx - hw, cy + hh],
     ],
-    // Top face (parallelogram — extends back-right from top edge)
     top: [
       [cx - hw, cy - hh],
       [cx + hw, cy - hh],
       [cx + hw + dx, cy - hh - dy],
       [cx - hw + dx, cy - hh - dy],
     ],
-    // Right face (parallelogram — extends back-right from right edge)
     right: [
       [cx + hw, cy - hh],
       [cx + hw + dx, cy - hh - dy],
@@ -113,6 +106,144 @@ function isoVertices(
 
 function pointsStr(pts: number[][]): string {
   return pts.map((p) => `${p[0]},${p[1]}`).join(" ");
+}
+
+// ─── Animation position data ─────────────────────────────────────────────────
+interface AnimPos {
+  x: number;
+  y: number;
+  prog: number;
+  opacity: number;
+  sinkProgress: number; // 0-1 for screws sinking into holes
+}
+
+/**
+ * Compute animated positions for ALL parts in a step.
+ *
+ * Three animation modes:
+ * 1. Default: spring from off-screen offset to final (x,y)
+ * 2. Screws with insertionTarget: start at screw's (x,y), travel to the target hole, then sink in
+ * 3. Parts with connectsTo: fly in, then slide toward their target in phase 2
+ */
+function computeAllPositions(
+  parts: PartType[],
+  frame: number,
+): Map<string, AnimPos> {
+  const posMap = new Map<string, AnimPos>();
+  const partsById = new Map<string, PartType>();
+  parts.forEach((p) => partsById.set(p.id, p));
+
+  // First pass: compute positions for non-screw parts (targets must exist before screws resolve holes)
+  parts.forEach((part, partIndex) => {
+    const shape = part.shape ?? inferShape(part.label);
+    if (part.insertionTarget && (shape === "screw" || shape === "dowel")) return; // handle in pass 2
+
+    const isScrew = shape === "screw" || shape === "dowel";
+    const stagger = partIndex === 0 ? 0 : 8 + partIndex * 10;
+    const adjFrame = Math.max(0, frame - stagger);
+
+    const prog = spring({
+      frame: adjFrame,
+      fps: FPS,
+      config: { damping: 14, stiffness: 150, mass: 1.0 },
+    });
+
+    const opacity = interpolate(adjFrame, [0, 12], [0, 1], {
+      extrapolateLeft: "clamp",
+      extrapolateRight: "clamp",
+    });
+
+    const relX = part.x / CANVAS_W - 0.5;
+    const fromX = relX * 200;
+    const fromY = isScrew ? -80 : -120;
+
+    const x = interpolate(prog, [0, 1], [part.x + fromX, part.x]);
+    const y = interpolate(prog, [0, 1], [part.y + fromY, part.y]);
+
+    posMap.set(part.id, { x, y, prog, opacity, sinkProgress: 0 });
+  });
+
+  // Second pass: connectsTo parts — slide toward their target
+  parts.forEach((part, partIndex) => {
+    if (!part.connectsTo) return;
+    const target = partsById.get(part.connectsTo);
+    if (!target) return;
+
+    const stagger = partIndex === 0 ? 0 : 8 + partIndex * 10;
+    const adjFrame = Math.max(0, frame - stagger);
+    const basePos = posMap.get(part.id)!;
+
+    const slideProg = interpolate(adjFrame, [40, 80], [0, 1], {
+      extrapolateLeft: "clamp",
+      extrapolateRight: "clamp",
+    });
+
+    if (slideProg > 0) {
+      const slideX = interpolate(slideProg, [0, 1], [0, (target.x - part.x) * 0.3]);
+      const slideY = interpolate(slideProg, [0, 1], [0, (target.y - part.y) * 0.3]);
+
+      posMap.set(part.id, {
+        ...basePos,
+        x: basePos.x + slideX * basePos.prog,
+        y: basePos.y + slideY * basePos.prog,
+      });
+    }
+  });
+
+  // Third pass: screws with insertionTarget — travel from screw (x,y) to hole position on target
+  parts.forEach((part, partIndex) => {
+    const shape = part.shape ?? inferShape(part.label);
+    if (!part.insertionTarget || (shape !== "screw" && shape !== "dowel")) return;
+
+    const stagger = partIndex === 0 ? 0 : 8 + partIndex * 10;
+    const adjFrame = Math.max(0, frame - stagger);
+
+    // Slower spring for screws — gives time to see them travel
+    const prog = spring({
+      frame: adjFrame,
+      fps: FPS,
+      config: { damping: 18, stiffness: 80, mass: 1.2 },
+    });
+
+    const opacity = interpolate(adjFrame, [0, 12], [0, 1], {
+      extrapolateLeft: "clamp",
+      extrapolateRight: "clamp",
+    });
+
+    // Resolve hole destination
+    const target = partsById.get(part.insertionTarget.targetPartId);
+    let destX = part.x;
+    let destY = part.y;
+
+    if (target) {
+      const tgtPos = posMap.get(target.id);
+      if (tgtPos) {
+        // Final destination = target part's animated position + hole offset
+        const hi = part.insertionTarget.holeIndex;
+        if (hi != null && target.holes && target.holes[hi]) {
+          destX = tgtPos.x + target.holes[hi].hx;
+          destY = tgtPos.y + target.holes[hi].hy;
+        } else {
+          destX = tgtPos.x;
+          destY = tgtPos.y;
+        }
+      }
+    }
+
+    // Screw starts at its own (x,y) and travels to the hole
+    const x = interpolate(prog, [0, 1], [part.x, destX]);
+    const y = interpolate(prog, [0, 1], [part.y, destY]);
+
+    // Sink phase: after arriving, screw pushes further into the hole
+    const sinkProgress = interpolate(adjFrame, [30, 60], [0, 1], {
+      extrapolateLeft: "clamp",
+      extrapolateRight: "clamp",
+    });
+
+    posMap.set(part.id, { x, y, prog, opacity, sinkProgress });
+  });
+
+  return posMap;
 }
 
 // ─── Root composition ────────────────────────────────────────────────────────
@@ -153,14 +284,14 @@ export const AssemblySteps: React.FC<RenderInput> = ({
   );
 };
 
-// ─── Step frame — left info panel + right isometric canvas ───────────────────
+// ─── Step frame — compact sidebar + large canvas ────────────────────────────
 function StepFrame({
   step,
   stepIndex,
   totalSteps,
   durationInFrames,
 }: {
-  step: RenderInput["steps"][number];
+  step: StepType;
   stepIndex: number;
   totalSteps: number;
   durationInFrames: number;
@@ -230,7 +361,7 @@ function StepFrame({
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            padding: "44px 72px 44px 28px",
+            padding: "32px 48px 32px 16px",
           }}
         >
           <IsoCanvas step={step} frame={frame} />
@@ -240,14 +371,14 @@ function StepFrame({
   );
 }
 
-// ─── Left info panel ─────────────────────────────────────────────────────────
+// ─── Left info panel (compact 320px) ────────────────────────���───────────────
 function LeftPanel({
   step,
   stepIndex,
   totalSteps,
   frame,
 }: {
-  step: RenderInput["steps"][number];
+  step: StepType;
   stepIndex: number;
   totalSteps: number;
   frame: number;
@@ -268,8 +399,8 @@ function LeftPanel({
   return (
     <div
       style={{
-        width: 540,
-        padding: "52px 40px 44px 80px",
+        width: 320,
+        padding: "36px 24px 32px 40px",
         display: "flex",
         flexDirection: "column",
         justifyContent: "center",
@@ -280,22 +411,22 @@ function LeftPanel({
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 14,
-          marginBottom: 32,
+          gap: 12,
+          marginBottom: 24,
           opacity: badgeAlpha,
         }}
       >
         <div
           style={{
-            width: 44,
-            height: 44,
+            width: 36,
+            height: 36,
             borderRadius: "50%",
             background: "linear-gradient(140deg, #3B82F6, #2563EB)",
             color: "white",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            fontSize: 20,
+            fontSize: 17,
             fontWeight: 800,
             boxShadow: "0 4px 14px rgba(59,130,246,0.45)",
             flexShrink: 0,
@@ -306,17 +437,17 @@ function LeftPanel({
         <div>
           <div
             style={{
-              fontSize: 11,
+              fontSize: 10,
               fontWeight: 700,
               color: "#94A3B8",
               textTransform: "uppercase",
               letterSpacing: "0.12em",
-              marginBottom: 2,
+              marginBottom: 1,
             }}
           >
             Assembly step
           </div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: "#475569" }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "#475569" }}>
             {stepIndex + 1} of {totalSteps}
           </div>
         </div>
@@ -325,11 +456,11 @@ function LeftPanel({
       {/* Title */}
       <h1
         style={{
-          fontSize: 48,
+          fontSize: 34,
           fontWeight: 800,
           color: "#0F172A",
           lineHeight: 1.1,
-          margin: "0 0 18px",
+          margin: "0 0 14px",
           letterSpacing: "-0.03em",
           opacity: titleAlpha,
         }}
@@ -340,11 +471,11 @@ function LeftPanel({
       {/* Accent rule */}
       <div
         style={{
-          width: 52,
+          width: 44,
           height: 4,
           background: "linear-gradient(90deg, #3B82F6, #8B5CF6)",
           borderRadius: 2,
-          marginBottom: 22,
+          marginBottom: 16,
           opacity: titleAlpha,
         }}
       />
@@ -352,10 +483,10 @@ function LeftPanel({
       {/* Caption */}
       <p
         style={{
-          fontSize: 20,
+          fontSize: 16,
           color: "#4B5563",
-          lineHeight: 1.65,
-          margin: "0 0 32px",
+          lineHeight: 1.6,
+          margin: "0 0 24px",
           fontWeight: 400,
           opacity: bodyAlpha,
         }}
@@ -363,69 +494,21 @@ function LeftPanel({
         {step.caption}
       </p>
 
-      {/* Parts summary */}
-      {step.parts.length > 0 && (
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            gap: 8,
-            marginBottom: 20,
-            opacity: bodyAlpha,
-          }}
-        >
-          {step.parts.map((part, i) => {
-            const shape = part.shape ?? inferShape(part.label);
-            const material = part.material ?? inferMaterial(part.label, shape);
-            const colors = MATERIALS[material];
-            return (
-              <span
-                key={i}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  backgroundColor: colors.top,
-                  border: `1.5px solid ${colors.stroke}`,
-                  borderRadius: 8,
-                  padding: "5px 12px",
-                  fontSize: 13,
-                  color: colors.label,
-                  fontWeight: 600,
-                }}
-              >
-                <span
-                  style={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: 2,
-                    backgroundColor: colors.front,
-                    border: `1px solid ${colors.stroke}`,
-                    flexShrink: 0,
-                  }}
-                />
-                {part.label}
-              </span>
-            );
-          })}
-        </div>
-      )}
-
       {/* Tools */}
       {step.tools.length > 0 && (
         <div
           style={{
             display: "flex",
             flexWrap: "wrap",
-            gap: 10,
+            gap: 8,
             alignItems: "center",
-            marginBottom: step.warnings.length > 0 ? 14 : 0,
+            marginBottom: step.warnings.length > 0 ? 12 : 0,
             opacity: bodyAlpha,
           }}
         >
           <span
             style={{
-              fontSize: 11,
+              fontSize: 10,
               fontWeight: 700,
               color: "#94A3B8",
               textTransform: "uppercase",
@@ -441,8 +524,8 @@ function LeftPanel({
                 backgroundColor: "#F8FAFC",
                 border: "1.5px solid #CBD5E1",
                 borderRadius: 8,
-                padding: "6px 14px",
-                fontSize: 14,
+                padding: "4px 10px",
+                fontSize: 12,
                 color: "#334155",
                 fontWeight: 600,
               }}
@@ -459,11 +542,11 @@ function LeftPanel({
           style={{
             backgroundColor: "#FFFBEB",
             border: "1.5px solid #FDE68A",
-            borderRadius: 12,
-            padding: "14px 18px",
+            borderRadius: 10,
+            padding: "10px 14px",
             display: "flex",
             flexDirection: "column",
-            gap: 8,
+            gap: 6,
             opacity: bodyAlpha,
           }}
         >
@@ -471,21 +554,13 @@ function LeftPanel({
             <div
               key={i}
               style={{
-                display: "flex",
-                alignItems: "flex-start",
-                gap: 10,
+                fontSize: 12,
+                color: "#92400E",
+                fontWeight: 600,
+                lineHeight: 1.4,
               }}
             >
-              <span
-                style={{
-                  fontSize: 14,
-                  color: "#92400E",
-                  fontWeight: 600,
-                  lineHeight: 1.4,
-                }}
-              >
-                {w}
-              </span>
+              {w}
             </div>
           ))}
         </div>
@@ -495,24 +570,23 @@ function LeftPanel({
 }
 
 // ─── Isometric SVG canvas ────────────────────────────────────────────────────
-function IsoCanvas({
-  step,
-  frame,
-}: {
-  step: RenderInput["steps"][number];
-  frame: number;
-}) {
+function IsoCanvas({ step, frame }: { step: StepType; frame: number }) {
+  const posMap = computeAllPositions(step.parts, frame);
+
   return (
     <div
       style={{
-        width: CANVAS_W,
-        height: CANVAS_H,
+        width: "100%",
+        height: "100%",
+        maxWidth: CANVAS_W * 1.6,
+        maxHeight: CANVAS_H * 1.6,
         backgroundColor: "#FFFFFF",
         borderRadius: 20,
         boxShadow:
           "0 24px 64px rgba(15,23,42,0.10), 0 4px 16px rgba(15,23,42,0.06)",
         position: "relative",
         overflow: "hidden",
+        aspectRatio: `${CANVAS_W} / ${CANVAS_H}`,
       }}
     >
       {/* Blueprint dot grid */}
@@ -550,7 +624,6 @@ function IsoCanvas({
         />
       ))}
 
-      {/* SVG isometric diagram */}
       <svg
         viewBox={`0 0 ${CANVAS_W} ${CANVAS_H}`}
         width="100%"
@@ -576,20 +649,154 @@ function IsoCanvas({
               floodOpacity="0.15"
             />
           </filter>
+          <filter id="holeGlow">
+            <feGaussianBlur stdDeviation="3" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+          <marker
+            id="arrowHead"
+            markerWidth="10"
+            markerHeight="7"
+            refX="9"
+            refY="3.5"
+            orient="auto"
+          >
+            <polygon points="0 0, 10 3.5, 0 7" fill="#3B82F6" />
+          </marker>
+          <marker
+            id="connectArrowHead"
+            markerWidth="8"
+            markerHeight="6"
+            refX="7"
+            refY="3"
+            orient="auto"
+          >
+            <polygon points="0 0, 8 3, 0 6" fill="#8B5CF6" />
+          </marker>
         </defs>
 
-        {step.parts.map((part, partIndex) => (
-          <IsoPart
-            key={part.id}
-            part={part}
-            partIndex={partIndex}
+        {/* Layer 0: Connection arrows between combining parts */}
+        {step.parts.map((part) => {
+          if (!part.connectsTo) return null;
+          const srcPos = posMap.get(part.id);
+          const tgtPos = posMap.get(part.connectsTo);
+          if (!srcPos || !tgtPos) return null;
+          return (
+            <ConnectionArrow
+              key={`conn-${part.id}`}
+              srcX={srcPos.x}
+              srcY={srcPos.y}
+              tgtX={tgtPos.x}
+              tgtY={tgtPos.y}
+              frame={frame}
+            />
+          );
+        })}
+
+        {/* Layer 1: Non-screw parts (panels, legs, brackets) */}
+        {step.parts.map((part, partIndex) => {
+          const shape = part.shape ?? inferShape(part.label);
+          if (shape === "screw" || shape === "dowel") return null;
+          return (
+            <IsoPart
+              key={part.id}
+              part={part}
+              partIndex={partIndex}
+              frame={frame}
+              totalParts={step.parts.length}
+              posMap={posMap}
+            />
+          );
+        })}
+
+        {/* Layer 2: Hole markers ON TOP of parts (visible on surface) */}
+        {step.parts.map((part) => {
+          if (!part.holes || part.holes.length === 0) return null;
+          const pos = posMap.get(part.id)!;
+          return (
+            <HoleMarkers
+              key={`holes-${part.id}`}
+              part={part}
+              cx={pos.x}
+              cy={pos.y}
+              frame={frame}
+            />
+          );
+        })}
+
+        {/* Layer 3: Insertion arrows (from screw start pos to hole) */}
+        {step.parts.map((part) => {
+          if (!part.insertionTarget) return null;
+          const tgtPart = step.parts.find(
+            (p) => p.id === part.insertionTarget!.targetPartId,
+          );
+          if (!tgtPart) return null;
+
+          const tgtPos = posMap.get(tgtPart.id);
+          if (!tgtPos) return null;
+
+          let holeX = tgtPos.x;
+          let holeY = tgtPos.y;
+          const hi = part.insertionTarget.holeIndex;
+          if (hi != null && tgtPart.holes && tgtPart.holes[hi]) {
+            holeX = tgtPos.x + tgtPart.holes[hi].hx;
+            holeY = tgtPos.y + tgtPart.holes[hi].hy;
+          }
+
+          return (
+            <InsertionArrow
+              key={`arrow-${part.id}`}
+              srcX={part.x}
+              srcY={part.y}
+              holeX={holeX}
+              holeY={holeY}
+              angle={part.insertionTarget.angle}
+              labelText={part.insertionTarget.labelText}
+              frame={frame}
+            />
+          );
+        })}
+
+        {/* Layer 4: Screw/dowel parts (on top of holes and arrows) */}
+        {step.parts.map((part, partIndex) => {
+          const shape = part.shape ?? inferShape(part.label);
+          if (shape !== "screw" && shape !== "dowel") return null;
+          return (
+            <IsoPart
+              key={part.id}
+              part={part}
+              partIndex={partIndex}
+              frame={frame}
+              totalParts={step.parts.length}
+              posMap={posMap}
+            />
+          );
+        })}
+
+        {/* Layer 5: Tool icons */}
+        {step.toolIcons?.map((toolIcon, i) => (
+          <ToolIcon
+            key={`tool-${i}`}
+            toolIcon={toolIcon}
             frame={frame}
-            totalParts={step.parts.length}
+            index={i}
           />
         ))}
+
+        {/* Layer 6: Detail inset */}
+        {step.detailInset && (
+          <DetailInset
+            inset={step.detailInset}
+            parts={step.parts}
+            posMap={posMap}
+            frame={frame}
+          />
+        )}
       </svg>
 
-      {/* Watermark */}
       <div
         style={{
           position: "absolute",
@@ -608,17 +815,545 @@ function IsoCanvas({
   );
 }
 
+// ─── Hole markers — bright, pulsing, highlighted ─────────────────────────────
+function HoleMarkers({
+  part,
+  cx,
+  cy,
+  frame,
+}: {
+  part: PartType;
+  cx: number;
+  cy: number;
+  frame: number;
+}) {
+  // Holes appear early and pulse to draw attention
+  const holeAlpha = interpolate(frame, [10, 20], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  if (holeAlpha <= 0 || !part.holes) return null;
+
+  // Pulse: cycles between 0.6 and 1.0 opacity
+  const pulse =
+    0.8 + 0.2 * Math.sin(((frame - 20) / FPS) * Math.PI * 2.5);
+
+  return (
+    <g opacity={holeAlpha}>
+      {part.holes.map((hole, i) => {
+        const r = hole.radius ?? 6;
+        const hx = cx + hole.hx;
+        const hy = cy + hole.hy;
+        return (
+          <g key={i} transform={`translate(${hx}, ${hy})`}>
+            {/* Outer glow ring */}
+            <circle
+              r={r + 4}
+              fill="none"
+              stroke="#3B82F6"
+              strokeWidth={2}
+              opacity={pulse * 0.4}
+              filter="url(#holeGlow)"
+            />
+            {/* Filled hole indicator */}
+            <circle r={r} fill="#3B82F6" opacity={pulse * 0.25} />
+            {/* Solid ring */}
+            <circle
+              r={r}
+              fill="none"
+              stroke="#3B82F6"
+              strokeWidth={2}
+              opacity={pulse * 0.8}
+            />
+            {/* Center dot */}
+            <circle r={1.5} fill="#3B82F6" opacity={pulse} />
+            {/* Crosshair lines extending slightly beyond ring */}
+            <line
+              x1={-(r + 3)}
+              y1={0}
+              x2={-r + 1}
+              y2={0}
+              stroke="#3B82F6"
+              strokeWidth={1.5}
+              opacity={pulse * 0.6}
+            />
+            <line
+              x1={r - 1}
+              y1={0}
+              x2={r + 3}
+              y2={0}
+              stroke="#3B82F6"
+              strokeWidth={1.5}
+              opacity={pulse * 0.6}
+            />
+            <line
+              x1={0}
+              y1={-(r + 3)}
+              x2={0}
+              y2={-r + 1}
+              stroke="#3B82F6"
+              strokeWidth={1.5}
+              opacity={pulse * 0.6}
+            />
+            <line
+              x1={0}
+              y1={r - 1}
+              x2={0}
+              y2={r + 3}
+              stroke="#3B82F6"
+              strokeWidth={1.5}
+              opacity={pulse * 0.6}
+            />
+          </g>
+        );
+      })}
+    </g>
+  );
+}
+
+// ─── Connection arrow (for combining parts) ──────────────────────────────────
+function ConnectionArrow({
+  srcX,
+  srcY,
+  tgtX,
+  tgtY,
+  frame,
+}: {
+  srcX: number;
+  srcY: number;
+  tgtX: number;
+  tgtY: number;
+  frame: number;
+}) {
+  // Appears as parts start to slide (frame 30-50)
+  const drawProg = spring({
+    frame: Math.max(0, frame - 30),
+    fps: FPS,
+    config: { damping: 20, stiffness: 100 },
+  });
+
+  if (drawProg <= 0.01) return null;
+
+  const midX = (srcX + tgtX) / 2;
+  const midY = (srcY + tgtY) / 2;
+
+  // Curved arrow from source toward target
+  const dx = tgtX - srcX;
+  const dy = tgtY - srcY;
+  const perpX = -dy * 0.15;
+  const perpY = dx * 0.15;
+
+  const ctrlX = midX + perpX;
+  const ctrlY = midY + perpY;
+
+  // Don't draw the arrow right to the target — stop partway
+  const endX = srcX + dx * 0.65;
+  const endY = srcY + dy * 0.65;
+
+  const pathD = `M ${srcX} ${srcY} Q ${ctrlX} ${ctrlY} ${endX} ${endY}`;
+  const pathLen = Math.sqrt(dx * dx + dy * dy) * 0.8;
+  const dashOffset = interpolate(drawProg, [0, 1], [pathLen, 0]);
+
+  return (
+    <g
+      opacity={interpolate(drawProg, [0, 0.15], [0, 0.65], {
+        extrapolateRight: "clamp",
+      })}
+    >
+      <path
+        d={pathD}
+        stroke="#8B5CF6"
+        strokeWidth={2}
+        strokeDasharray="6,4"
+        fill="none"
+        markerEnd="url(#connectArrowHead)"
+        style={{ strokeDashoffset: dashOffset }}
+      />
+    </g>
+  );
+}
+
+// ─── Insertion arrow (screw → specific hole) ─────────────────────────────────
+function InsertionArrow({
+  srcX,
+  srcY,
+  holeX,
+  holeY,
+  angle,
+  labelText,
+  frame,
+}: {
+  srcX: number;
+  srcY: number;
+  holeX: number;
+  holeY: number;
+  angle: number;
+  labelText?: string;
+  frame: number;
+}) {
+  const drawProg = spring({
+    frame: Math.max(0, frame - 25),
+    fps: FPS,
+    config: { damping: 20, stiffness: 100 },
+  });
+
+  if (drawProg <= 0.01) return null;
+
+  // Arrow from the screw's current position pointing toward the hole
+  const dx = holeX - srcX;
+  const dy = holeY - srcY;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+
+  // Only show arrow if screw is still some distance from hole
+  if (dist < 8) return null;
+
+  // Slight curve perpendicular to the line
+  const perpX = -dy * 0.1;
+  const perpY = dx * 0.1;
+
+  const midX = (srcX + holeX) / 2 + perpX;
+  const midY = (srcY + holeY) / 2 + perpY;
+
+  const pathD = `M ${srcX} ${srcY} Q ${midX} ${midY} ${holeX} ${holeY}`;
+  const pathLen = dist * 1.1;
+  const dashOffset = interpolate(drawProg, [0, 1], [pathLen, 0]);
+
+  return (
+    <g
+      opacity={interpolate(drawProg, [0, 0.2], [0, 0.7], {
+        extrapolateRight: "clamp",
+      })}
+    >
+      <path
+        d={pathD}
+        stroke="#3B82F6"
+        strokeWidth={2}
+        strokeDasharray="6,4"
+        fill="none"
+        markerEnd="url(#arrowHead)"
+        style={{ strokeDashoffset: dashOffset }}
+      />
+      {labelText && drawProg > 0.5 && (
+        <text
+          x={midX}
+          y={midY - 10}
+          textAnchor="middle"
+          fontSize={11}
+          fontWeight={700}
+          fill="#3B82F6"
+          fontFamily="Inter, SF Pro Display, Helvetica Neue, Arial, sans-serif"
+          opacity={interpolate(drawProg, [0.5, 0.8], [0, 1], {
+            extrapolateRight: "clamp",
+          })}
+        >
+          {labelText}
+        </text>
+      )}
+    </g>
+  );
+}
+
+// ─── Tool icon SVG components ────────────────────────────────────────────────
+function ToolIcon({
+  toolIcon,
+  frame,
+  index,
+}: {
+  toolIcon: NonNullable<StepType["toolIcons"]>[number];
+  frame: number;
+  index: number;
+}) {
+  const stagger = 40 + index * 8;
+  const prog = spring({
+    frame: Math.max(0, frame - stagger),
+    fps: FPS,
+    config: { damping: 16, stiffness: 120 },
+  });
+
+  const opacity = interpolate(prog, [0, 0.4], [0, 0.85], {
+    extrapolateRight: "clamp",
+  });
+  const slideX = interpolate(prog, [0, 1], [-60, 0]);
+  const scale = toolIcon.scale ?? 1.0;
+  const rot = toolIcon.rotationDeg ?? 0;
+
+  if (prog <= 0.01) return null;
+
+  return (
+    <g
+      transform={`translate(${toolIcon.x + slideX}, ${toolIcon.y}) rotate(${rot}) scale(${scale})`}
+      opacity={opacity}
+      filter="url(#hwShadow)"
+    >
+      {toolIcon.tool === "allen_key" && <AllenKeyIcon />}
+      {toolIcon.tool === "phillips_screwdriver" && <PhillipsScrewdriverIcon />}
+      {toolIcon.tool === "flat_screwdriver" && <FlatScrewdriverIcon />}
+      {toolIcon.tool === "hammer" && <HammerIcon />}
+      {toolIcon.tool === "hand" && <HandIcon />}
+      <text
+        x={0}
+        y={45}
+        textAnchor="middle"
+        fontSize={10}
+        fontWeight={700}
+        fill="#64748B"
+        fontFamily="Inter, SF Pro Display, Helvetica Neue, Arial, sans-serif"
+      >
+        {toolIcon.tool.replace(/_/g, " ")}
+      </text>
+    </g>
+  );
+}
+
+function AllenKeyIcon() {
+  return (
+    <g>
+      <path
+        d="M -15 0 L 15 0 L 15 -40"
+        stroke="#475569"
+        strokeWidth={5}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+      <path
+        d="M -14 -1 L 14 -1 L 14 -38"
+        stroke="#94A3B8"
+        strokeWidth={1.5}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+        opacity={0.5}
+      />
+    </g>
+  );
+}
+
+function PhillipsScrewdriverIcon() {
+  return (
+    <g>
+      <rect x={-7} y={-35} width={14} height={30} rx={4} fill="#F97316" stroke="#C2410C" strokeWidth={1.5} />
+      <line x1={-5} y1={-28} x2={5} y2={-28} stroke="#C2410C" strokeWidth={0.8} opacity={0.5} />
+      <line x1={-5} y1={-22} x2={5} y2={-22} stroke="#C2410C" strokeWidth={0.8} opacity={0.5} />
+      <line x1={-5} y1={-16} x2={5} y2={-16} stroke="#C2410C" strokeWidth={0.8} opacity={0.5} />
+      <rect x={-2.5} y={-5} width={5} height={28} rx={1} fill="#A8B4C2" stroke="#7E8E9E" strokeWidth={1} />
+      <line x1={-3} y1={24} x2={3} y2={24} stroke="#5A6A7A" strokeWidth={2} strokeLinecap="round" />
+      <line x1={0} y1={21} x2={0} y2={27} stroke="#5A6A7A" strokeWidth={2} strokeLinecap="round" />
+    </g>
+  );
+}
+
+function FlatScrewdriverIcon() {
+  return (
+    <g>
+      <rect x={-7} y={-35} width={14} height={30} rx={4} fill="#FBBF24" stroke="#D97706" strokeWidth={1.5} />
+      <rect x={-2.5} y={-5} width={5} height={28} rx={1} fill="#A8B4C2" stroke="#7E8E9E" strokeWidth={1} />
+      <rect x={-5} y={23} width={10} height={3} rx={0.5} fill="#7E8E9E" stroke="#5A6A7A" strokeWidth={1} />
+    </g>
+  );
+}
+
+function HammerIcon() {
+  return (
+    <g>
+      <rect x={-3} y={-5} width={6} height={40} rx={2} fill="#D2B48C" stroke="#A08865" strokeWidth={1.5} />
+      <rect x={-18} y={-15} width={36} height={14} rx={3} fill="#7E8E9E" stroke="#5A6A7A" strokeWidth={1.5} />
+      <rect x={-16} y={-13} width={32} height={3} rx={1} fill="white" opacity={0.2} />
+    </g>
+  );
+}
+
+function HandIcon() {
+  return (
+    <g>
+      <path
+        d="M -8 15 L -8 -5 Q -8 -12 -3 -18 L 0 -22 Q 2 -25 5 -22 L 5 -15 L 8 -20 Q 10 -23 13 -20 L 10 -10 L 13 -14 Q 15 -17 18 -14 L 14 -2 L 14 10 Q 14 18 8 22 L -2 22 Q -8 22 -8 15 Z"
+        fill="#FDDCB5"
+        stroke="#C9956B"
+        strokeWidth={1.5}
+        strokeLinejoin="round"
+      />
+    </g>
+  );
+}
+
+// ─── Detail inset (zoom callout) ─────────────────────────────────────────────
+function DetailInset({
+  inset,
+  parts,
+  posMap,
+  frame,
+}: {
+  inset: NonNullable<StepType["detailInset"]>;
+  parts: PartType[];
+  posMap: Map<string, AnimPos>;
+  frame: number;
+}) {
+  const scaleProg = spring({
+    frame: Math.max(0, frame - 50),
+    fps: FPS,
+    config: { damping: 18, stiffness: 120 },
+  });
+
+  if (scaleProg <= 0.01) return null;
+
+  const zoom = inset.zoom ?? 2.5;
+  const bubbleR = 55;
+  const clipId = `detail-clip-${inset.cx}-${inset.cy}`;
+  const scaleVal = interpolate(scaleProg, [0, 1], [0.3, 1]);
+  const alpha = interpolate(scaleProg, [0, 0.3], [0, 1], {
+    extrapolateRight: "clamp",
+  });
+
+  return (
+    <g opacity={alpha}>
+      {/* Source region indicator */}
+      <circle
+        cx={inset.cx}
+        cy={inset.cy}
+        r={inset.radius}
+        fill="none"
+        stroke="#334155"
+        strokeWidth={1.5}
+        strokeDasharray="4,4"
+        opacity={0.5}
+      />
+
+      {/* Leader line */}
+      <line
+        x1={inset.cx}
+        y1={inset.cy}
+        x2={inset.anchorX}
+        y2={inset.anchorY}
+        stroke="#334155"
+        strokeWidth={1.5}
+        strokeDasharray="6,4"
+        opacity={0.4}
+      />
+
+      <g
+        transform={`translate(${inset.anchorX}, ${inset.anchorY}) scale(${scaleVal})`}
+      >
+        <defs>
+          <clipPath id={clipId}>
+            <circle r={bubbleR} />
+          </clipPath>
+        </defs>
+
+        <circle r={bubbleR} fill="white" />
+
+        <g clipPath={`url(#${clipId})`}>
+          <g
+            transform={`scale(${zoom}) translate(${-inset.cx}, ${-inset.cy})`}
+          >
+            {parts.map((part) => {
+              const pos = posMap.get(part.id);
+              if (!pos) return null;
+              const dx = pos.x - inset.cx;
+              const dy = pos.y - inset.cy;
+              if (Math.sqrt(dx * dx + dy * dy) > inset.radius * 2.5)
+                return null;
+
+              const shape = part.shape ?? inferShape(part.label);
+              const material =
+                part.material ?? inferMaterial(part.label, shape);
+              const colors = MATERIALS[material];
+              const defaults = SHAPE_DEFAULTS[shape];
+              const w = part.w ?? defaults.w;
+              const h = part.h ?? defaults.h;
+              const d = part.d ?? defaults.d;
+
+              if (shape === "screw") {
+                return (
+                  <ScrewShape
+                    key={`inset-${part.id}`}
+                    cx={pos.x}
+                    cy={pos.y}
+                    colors={colors}
+                    opacity={1}
+                    rotation={part.rotationDeg}
+                    label=""
+                  />
+                );
+              }
+
+              return (
+                <IsoBoxShape
+                  key={`inset-${part.id}`}
+                  cx={pos.x}
+                  cy={pos.y}
+                  w={w}
+                  h={h}
+                  d={d}
+                  colors={colors}
+                  opacity={1}
+                  rotation={part.rotationDeg}
+                  label=""
+                  showMotion={false}
+                  motionFromY={0}
+                />
+              );
+            })}
+
+            {/* Holes in inset */}
+            {parts.map((part) => {
+              if (!part.holes) return null;
+              const pos = posMap.get(part.id);
+              if (!pos) return null;
+              return part.holes.map((hole, hi) => {
+                const r = hole.radius ?? 6;
+                return (
+                  <g
+                    key={`inset-hole-${part.id}-${hi}`}
+                    transform={`translate(${pos.x + hole.hx}, ${pos.y + hole.hy})`}
+                  >
+                    <circle r={r} fill="#3B82F6" opacity={0.25} />
+                    <circle
+                      r={r}
+                      fill="none"
+                      stroke="#3B82F6"
+                      strokeWidth={1.5}
+                    />
+                    <circle r={1.5} fill="#3B82F6" />
+                  </g>
+                );
+              });
+            })}
+          </g>
+        </g>
+
+        <circle r={bubbleR} fill="none" stroke="#334155" strokeWidth={3} />
+
+        <text
+          x={0}
+          y={bubbleR + 14}
+          textAnchor="middle"
+          fontSize={9}
+          fontWeight={700}
+          fill="#64748B"
+          fontFamily="Inter, SF Pro Display, Helvetica Neue, Arial, sans-serif"
+          letterSpacing="0.1em"
+        >
+          DETAIL
+        </text>
+      </g>
+    </g>
+  );
+}
+
 // ─── Isometric part router ───────────────────────────────────────────────────
 function IsoPart({
   part,
   partIndex,
   frame,
   totalParts,
+  posMap,
 }: {
-  part: RenderInput["steps"][number]["parts"][number];
+  part: PartType;
   partIndex: number;
   frame: number;
   totalParts: number;
+  posMap: Map<string, AnimPos>;
 }) {
   const shape = part.shape ?? inferShape(part.label);
   const material = part.material ?? inferMaterial(part.label, shape);
@@ -628,44 +1363,47 @@ function IsoPart({
   const h = part.h ?? defaults.h;
   const d = part.d ?? defaults.d;
 
-  // Stagger: first part appears fast (the "base"), others fly in later
+  const pos = posMap.get(part.id)!;
+  const { x: curX, y: curY, prog, opacity, sinkProgress } = pos;
+
+  // Screw rotation: multi-turn spin
   const stagger = partIndex === 0 ? 0 : 8 + partIndex * 10;
   const adjFrame = Math.max(0, frame - stagger);
-
-  const prog = spring({
-    frame: adjFrame,
-    fps: FPS,
-    config: { damping: 14, stiffness: 150, mass: 1.0 },
-  });
-
-  const opacity = interpolate(adjFrame, [0, 12], [0, 1], {
-    extrapolateLeft: "clamp",
-    extrapolateRight: "clamp",
-  });
-
-  // Approach direction: parts come from above and slightly lateral
-  const relX = part.x / CANVAS_W - 0.5;
-  const fromX = relX * 200;
-  const fromY = shape === "screw" || shape === "dowel" ? -80 : -120;
-
-  const curX = interpolate(prog, [0, 1], [part.x + fromX, part.x]);
-  const curY = interpolate(prog, [0, 1], [part.y + fromY, part.y]);
-
-  // Screw rotation animation
-  const screwRot =
-    shape === "screw"
-      ? interpolate(prog, [0, 1], [180, 0], {
-          extrapolateRight: "clamp",
-        })
-      : 0;
+  let screwRot = 0;
+  if (shape === "screw") {
+    const travelSpin = interpolate(adjFrame, [0, 20], [0, 540], {
+      extrapolateLeft: "clamp",
+      extrapolateRight: "clamp",
+    });
+    const tightenSpin = interpolate(adjFrame, [20, 50], [0, 360], {
+      extrapolateLeft: "clamp",
+      extrapolateRight: "clamp",
+    });
+    screwRot = travelSpin + tightenSpin;
+  }
 
   const totalRot = part.rotationDeg + screwRot;
+
+  // For screws: apply sink offset (screw moves further in insertion direction after arriving)
+  let sinkOffsetX = 0;
+  let sinkOffsetY = 0;
+  if (sinkProgress > 0 && part.insertionTarget) {
+    const angleRad = (part.insertionTarget.angle * Math.PI) / 180;
+    const sinkDist = 12 * sinkProgress; // sink 12 units into the hole
+    sinkOffsetX = -Math.sin(angleRad) * sinkDist;
+    sinkOffsetY = Math.cos(angleRad) * sinkDist;
+  }
+
+  const finalX = curX + sinkOffsetX;
+  const finalY = curY + sinkOffsetY;
+
+  const fromY = shape === "screw" || shape === "dowel" ? -80 : -120;
 
   if (shape === "screw") {
     return (
       <ScrewShape
-        cx={curX}
-        cy={curY}
+        cx={finalX}
+        cy={finalY}
         colors={colors}
         opacity={opacity}
         rotation={totalRot}
@@ -677,8 +1415,8 @@ function IsoPart({
   if (shape === "dowel") {
     return (
       <DowelShape
-        cx={curX}
-        cy={curY}
+        cx={finalX}
+        cy={finalY}
         w={w}
         h={h}
         d={d}
@@ -690,7 +1428,6 @@ function IsoPart({
     );
   }
 
-  // Panel, leg, bracket — all render as isometric boxes
   return (
     <IsoBoxShape
       cx={curX}
@@ -708,7 +1445,7 @@ function IsoPart({
   );
 }
 
-// ─── Isometric box (panels, legs, brackets) ──────────────────────────────────
+// ���── Isometric box (panels, legs, brackets) ──────────────────────────────────
 function IsoBoxShape({
   cx,
   cy,
@@ -736,9 +1473,7 @@ function IsoBoxShape({
 }) {
   const verts = isoVertices(0, 0, w, h, d);
   const dx = d * ISO_DX;
-  const dy = d * ISO_DY;
 
-  // Label position: below the front face, centered
   const labelY = h / 2 + 22;
 
   return (
@@ -747,7 +1482,6 @@ function IsoBoxShape({
       opacity={opacity}
       filter="url(#partShadow)"
     >
-      {/* Motion trail lines */}
       {showMotion && (
         <>
           <line
@@ -773,7 +1507,6 @@ function IsoBoxShape({
         </>
       )}
 
-      {/* Right face (darkest — draw first, back of painter order) */}
       <polygon
         points={pointsStr(verts.right)}
         fill={colors.right}
@@ -781,7 +1514,6 @@ function IsoBoxShape({
         strokeWidth={1.5}
         strokeLinejoin="round"
       />
-      {/* Top face (lightest) */}
       <polygon
         points={pointsStr(verts.top)}
         fill={colors.top}
@@ -789,7 +1521,6 @@ function IsoBoxShape({
         strokeWidth={1.5}
         strokeLinejoin="round"
       />
-      {/* Front face (main visible) */}
       <polygon
         points={pointsStr(verts.front)}
         fill={colors.front}
@@ -798,7 +1529,6 @@ function IsoBoxShape({
         strokeLinejoin="round"
       />
 
-      {/* Wood grain lines on front face (if wood and large enough) */}
       {colors === MATERIALS.wood && w > 60 && (
         <>
           <line
@@ -822,29 +1552,31 @@ function IsoBoxShape({
         </>
       )}
 
-      {/* Label */}
-      <text
-        x={dx / 2}
-        y={labelY}
-        textAnchor="middle"
-        fontSize={13}
-        fontWeight={700}
-        fontFamily="Inter, SF Pro Display, Helvetica Neue, Arial, sans-serif"
-        fill={colors.label}
-        letterSpacing="0.02em"
-      >
-        {label}
-      </text>
-      {/* Label connector line */}
-      <line
-        x1={dx / 2}
-        y1={h / 2 + 2}
-        x2={dx / 2}
-        y2={labelY - 14}
-        stroke={colors.stroke}
-        strokeWidth={1}
-        opacity={0.35}
-      />
+      {label && (
+        <>
+          <text
+            x={dx / 2}
+            y={labelY}
+            textAnchor="middle"
+            fontSize={13}
+            fontWeight={700}
+            fontFamily="Inter, SF Pro Display, Helvetica Neue, Arial, sans-serif"
+            fill={colors.label}
+            letterSpacing="0.02em"
+          >
+            {label}
+          </text>
+          <line
+            x1={dx / 2}
+            y1={h / 2 + 2}
+            x2={dx / 2}
+            y2={labelY - 14}
+            stroke={colors.stroke}
+            strokeWidth={1}
+            opacity={0.35}
+          />
+        </>
+      )}
     </g>
   );
 }
@@ -865,80 +1597,84 @@ function ScrewShape({
   rotation: number;
   label: string;
 }) {
-  const R = 12; // head radius
+  const R = 12;
   const shaftLen = 18;
 
   return (
     <g
-      transform={`translate(${cx}, ${cy}) rotate(${rotation})`}
+      transform={`translate(${cx}, ${cy})`}
       opacity={opacity}
       filter="url(#hwShadow)"
     >
-      {/* Shaft */}
-      <rect
-        x={-2.5}
-        y={R * 0.4}
-        width={5}
-        height={shaftLen}
-        fill={colors.right}
-        stroke={colors.stroke}
-        strokeWidth={1}
-        rx={1.5}
-      />
-      {/* Thread lines on shaft */}
-      {[0.3, 0.5, 0.7, 0.9].map((t) => (
-        <line
-          key={t}
-          x1={-3.5}
-          y1={R * 0.4 + shaftLen * t}
-          x2={3.5}
-          y2={R * 0.4 + shaftLen * t - 2}
+      <g transform={`rotate(${rotation})`}>
+        <rect
+          x={-2.5}
+          y={R * 0.4}
+          width={5}
+          height={shaftLen}
+          fill={colors.right}
           stroke={colors.stroke}
-          strokeWidth={0.7}
-          opacity={0.5}
+          strokeWidth={1}
+          rx={1.5}
         />
-      ))}
-      {/* Screw head */}
-      <circle
-        r={R}
-        fill={colors.top}
-        stroke={colors.stroke}
-        strokeWidth={1.5}
-      />
-      {/* Phillips cross */}
-      <line
-        x1={-R * 0.5}
-        y1={0}
-        x2={R * 0.5}
-        y2={0}
-        stroke={colors.stroke}
-        strokeWidth={2}
-        strokeLinecap="round"
-      />
-      <line
-        x1={0}
-        y1={-R * 0.5}
-        x2={0}
-        y2={R * 0.5}
-        stroke={colors.stroke}
-        strokeWidth={2}
-        strokeLinecap="round"
-      />
-      {/* Highlight */}
-      <circle r={R * 0.3} cx={-R * 0.2} cy={-R * 0.2} fill="white" opacity={0.3} />
+        {[0.3, 0.5, 0.7, 0.9].map((t) => (
+          <line
+            key={t}
+            x1={-3.5}
+            y1={R * 0.4 + shaftLen * t}
+            x2={3.5}
+            y2={R * 0.4 + shaftLen * t - 2}
+            stroke={colors.stroke}
+            strokeWidth={0.7}
+            opacity={0.5}
+          />
+        ))}
+        <circle
+          r={R}
+          fill={colors.top}
+          stroke={colors.stroke}
+          strokeWidth={1.5}
+        />
+        <line
+          x1={-R * 0.5}
+          y1={0}
+          x2={R * 0.5}
+          y2={0}
+          stroke={colors.stroke}
+          strokeWidth={2}
+          strokeLinecap="round"
+        />
+        <line
+          x1={0}
+          y1={-R * 0.5}
+          x2={0}
+          y2={R * 0.5}
+          stroke={colors.stroke}
+          strokeWidth={2}
+          strokeLinecap="round"
+        />
+        <circle
+          r={R * 0.3}
+          cx={-R * 0.2}
+          cy={-R * 0.2}
+          fill="white"
+          opacity={0.3}
+        />
+      </g>
 
-      {/* Label */}
-      <text
-        x={0}
-        y={R + shaftLen + 18}
-        textAnchor="middle"
-        fontSize={12}
-        fontWeight={700}
-        fontFamily="Inter, SF Pro Display, Helvetica Neue, Arial, sans-serif"
-        fill={colors.label}
-      >
-        {label}
-      </text>
+      {label && (
+        <text
+          x={0}
+          y={R + shaftLen + 18}
+          textAnchor="middle"
+          fontSize={12}
+          fontWeight={700}
+          fontFamily="Inter, SF Pro Display, Helvetica Neue, Arial, sans-serif"
+          fill={colors.label}
+        >
+          {label}
+        </text>
+      )}
     </g>
   );
 }
@@ -974,7 +1710,6 @@ function DowelShape({
       opacity={opacity}
       filter="url(#hwShadow)"
     >
-      {/* Dowel body — rounded rectangle (capsule) */}
       <rect
         x={-bodyW / 2}
         y={-bodyH / 2}
@@ -985,7 +1720,6 @@ function DowelShape({
         strokeWidth={1.5}
         rx={bodyW / 2}
       />
-      {/* Ridge lines */}
       {[-0.25, 0, 0.25].map((t) => (
         <line
           key={t}
@@ -998,7 +1732,6 @@ function DowelShape({
           opacity={0.35}
         />
       ))}
-      {/* Highlight streak */}
       <rect
         x={-bodyW * 0.15}
         y={-bodyH / 2 + 2}
@@ -1009,18 +1742,19 @@ function DowelShape({
         rx={2}
       />
 
-      {/* Label */}
-      <text
-        x={0}
-        y={bodyH / 2 + 18}
-        textAnchor="middle"
-        fontSize={12}
-        fontWeight={700}
-        fontFamily="Inter, SF Pro Display, Helvetica Neue, Arial, sans-serif"
-        fill={colors.label}
-      >
-        {label}
-      </text>
+      {label && (
+        <text
+          x={0}
+          y={bodyH / 2 + 18}
+          textAnchor="middle"
+          fontSize={12}
+          fontWeight={700}
+          fontFamily="Inter, SF Pro Display, Helvetica Neue, Arial, sans-serif"
+          fill={colors.label}
+        >
+          {label}
+        </text>
+      )}
     </g>
   );
 }

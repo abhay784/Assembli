@@ -18,7 +18,62 @@ Each part has required fields (id, label, x, y, rotationDeg) and optional visual
 - w, h, d: width, height, depth in diagram units. Flat boards are wide with small h (e.g. w:260 h:14 d:90). Legs are narrow and tall (w:24 h:110 d:24). Screws are tiny (w:14 h:14 d:6).
 - material: "wood" | "metal" | "plastic" — drives color palette. Screws and brackets are metal; panels, shelves, legs are wood.
 
-Position parts in a 1000×500 coordinate space. Use x,y to show spatial relationships between parts as they appear in the manual diagram.`;
+Position parts in a 1000×500 coordinate space. The rendering uses isometric projection: depth (d) extends to the upper-right. "Front" parts appear lower-left; "back" parts appear upper-right.
+
+CRITICAL — Spatial positioning and assembly logic:
+Think about WHERE parts physically attach in 3D space. A 4-leg table has legs at 4 CORNERS — not in a row. In isometric view:
+- Front-left corner = lower-left on screen
+- Front-right corner = lower-right on screen
+- Back-left corner = upper-left on screen (shifted up and right by depth)
+- Back-right corner = upper-right on screen (shifted up and right by depth)
+
+Holes on a panel must reflect real 3D corner positions using BOTH hx AND hy offsets. For a tabletop (w:300, d:160), front-edge holes have hy ≈ +4 (near bottom of front face), back-edge holes have hy ≈ -40 (shifted up for isometric depth).
+
+Split assembly into logical sub-steps from the manual. If a table has 4 legs, attach front legs first (one step) then back legs (separate step) — not all 4 at once. Each step should be focused and clear.
+
+IMPORTANT — Viewing angle for back-side work:
+When a step requires working on the back/far side of a piece, ROTATE the view so that side faces the viewer. Do NOT place parts behind or on top of the main piece. Instead:
+- Describe the rotation in the caption ("Rotate so the back edge faces you")
+- Position the active holes on the NEAR edge of the part (hy ≈ +4, visible front face)
+- Previously attached parts from the other side appear on the FAR side (upper area, smaller)
+- New parts and screws are positioned below the main piece, facing the viewer
+
+This ensures all active work is always visible and not obscured by the main piece.
+
+The FINAL step of any assembly must show the FULLY assembled product with ALL parts in their connected positions. Every part that was attached in prior steps must appear in the final view.
+
+Previously attached parts should appear in later steps at their assembled position (no connectsTo or insertionTarget — they are already fixed in place).
+
+CRITICAL — Hole and fastener accuracy:
+Create ONE separate part per fastener. Do NOT combine multiple screws into "Screw (x4)" — emit 4 individual screw parts, each with its own id. The animation system moves each screw into its specific hole.
+
+The number of holes on a receiving part MUST exactly match the number of individual fastener parts targeting it. Count carefully from the manual diagrams — getting screw count and placement wrong makes the video misleading.
+
+Position each screw at its STARTING location ABOVE/BESIDE the target — NOT at the hole. The screw's (x,y) is where it begins. The animation system automatically moves it from there to the hole. Place screws offset from the target in the direction opposite to the insertion angle. For angle:0 (down), place the screw ABOVE the target (lower y value).
+
+For fastener parts (screws, bolts, dowels), ALWAYS include an insertionTarget object:
+- targetPartId: the id of the part the fastener connects to.
+- angle: insertion direction in degrees (0=down, 90=left, 180=up, 270=right). Look at the manual diagram arrows to determine direction.
+- holeIndex: the index (0-based) into the target part's holes array that this specific fastener enters. Each screw targets exactly one hole.
+- labelText: optional annotation like "hand-tighten".
+
+For EVERY part that receives fasteners (panels, frames, legs), ALWAYS include a holes array:
+- One hole entry per fastener that goes into this part.
+- hx, hy: offset from the part center in diagram units. Place holes at the actual connection points — use BOTH hx and hy to represent corner positions in isometric view.
+- radius: optional visual radius (default 6).
+
+For parts that physically connect to another part (e.g. a leg attaching to a shelf, a panel sliding into a frame), include connectsTo with the target part's id. This drives the slide-together animation showing the two pieces joining.
+
+Include toolIcons at the step level to show tools visually on the diagram:
+- tool: "allen_key" | "phillips_screwdriver" | "flat_screwdriver" | "hammer" | "hand"
+- x, y: position in the 1000×500 canvas, near the action area.
+- rotationDeg: angle of the tool icon (optional).
+- scale: size multiplier (optional, default 1.0).
+
+For steps with intricate connections, include a detailInset to create a zoom callout:
+- cx, cy, radius: the source region to magnify.
+- anchorX, anchorY: where to draw the magnified bubble (pick an empty area of the canvas).
+- zoom: magnification factor (optional, default 2.5).`;
 
 function textFromMessage(message: Message): string {
   const parts: string[] = [];

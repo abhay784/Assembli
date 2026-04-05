@@ -4,7 +4,7 @@ import { AssemblySteps } from "./compositions/AssemblySteps";
 import { mockScene } from "../lib/scene/mock";
 
 export const RemotionRoot: React.FC = () => {
-  const defaultDurations = mockScene.steps.map(() => 45);
+  const defaultDurations = mockScene.steps.map(() => 300);
   const totalFrames = defaultDurations.reduce((a, b) => a + b, 0);
 
   return (

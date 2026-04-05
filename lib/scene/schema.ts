@@ -7,6 +7,26 @@ import { z } from "zod";
  * Steps do not carry a separate string id in Phase 1 — ordering is array order only (D-02).
  */
 
+const holeSchema = z.object({
+  /** X offset from part center in diagram units. */
+  hx: z.number(),
+  /** Y offset from part center in diagram units. */
+  hy: z.number(),
+  /** Visual radius of the hole marker. */
+  radius: z.number().optional(),
+});
+
+const insertionTargetSchema = z.object({
+  /** ID of the part this fastener connects to. */
+  targetPartId: z.string(),
+  /** Insertion direction in degrees: 0=down, 90=left, 180=up, 270=right. */
+  angle: z.number(),
+  /** Index into the target part's holes array — which specific hole this fastener enters. */
+  holeIndex: z.number().optional(),
+  /** Optional annotation like "x4" or "hand-tighten". */
+  labelText: z.string().optional(),
+});
+
 const partSchema = z.object({
   id: z.string().min(1),
   label: z.string(),
@@ -25,6 +45,41 @@ const partSchema = z.object({
   d: z.number().optional(),
   /** Material drives color palette. Inferred from label/shape when absent. */
   material: z.enum(["wood", "metal", "plastic"]).optional(),
+  /** Where this fastener inserts into — drives directional arrow rendering. */
+  insertionTarget: insertionTargetSchema.optional(),
+  /** Hole/insertion point markers on receiving parts. */
+  holes: z.array(holeSchema).optional(),
+  /** ID of another part this part physically connects to — drives slide-together animation. */
+  connectsTo: z.string().optional(),
+});
+
+const toolIconSchema = z.object({
+  tool: z.enum([
+    "allen_key",
+    "phillips_screwdriver",
+    "flat_screwdriver",
+    "hammer",
+    "hand",
+  ]),
+  x: z.number(),
+  y: z.number(),
+  rotationDeg: z.number().optional(),
+  scale: z.number().optional(),
+});
+
+const detailInsetSchema = z.object({
+  /** Center X of the source region to magnify. */
+  cx: z.number(),
+  /** Center Y of the source region to magnify. */
+  cy: z.number(),
+  /** Radius of the source region. */
+  radius: z.number(),
+  /** Where to draw the magnified inset bubble — X. */
+  anchorX: z.number(),
+  /** Where to draw the magnified inset bubble — Y. */
+  anchorY: z.number(),
+  /** Magnification factor (default 2.5). */
+  zoom: z.number().optional(),
 });
 
 const stepSchema = z.object({
@@ -34,6 +89,10 @@ const stepSchema = z.object({
   confidence: z.number().min(0).max(1),
   tools: z.array(z.string()),
   warnings: z.array(z.string()),
+  /** Visual tool placements on the canvas diagram. */
+  toolIcons: z.array(toolIconSchema).optional(),
+  /** Zoom callout showing detail of a specific area. */
+  detailInset: detailInsetSchema.optional(),
 });
 
 export const sceneSchema = z
