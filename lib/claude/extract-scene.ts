@@ -49,7 +49,13 @@ Create ONE separate part per fastener. Do NOT combine multiple screws into "Scre
 
 The number of holes on a receiving part MUST exactly match the number of individual fastener parts targeting it. Count carefully from the manual diagrams — getting screw count and placement wrong makes the video misleading.
 
-Position each screw at its STARTING location ABOVE/BESIDE the target — NOT at the hole. The screw's (x,y) is where it begins. The animation system automatically moves it from there to the hole. Place screws offset from the target in the direction opposite to the insertion angle. For angle:0 (down), place the screw ABOVE the target (lower y value).
+Position each fastener (screw, dowel, bolt) at its STARTING location AWAY from the target — NOT at the hole. The fastener's (x,y) is where it BEGINS before animating. The animation system moves it to the hole automatically. Offset at least 80-120 units away in the opposite direction of insertion:
+- angle:0 (inserting DOWN) → place fastener ABOVE the hole: y = hole_y - 100 (LOWER y value)
+- angle:180 (inserting UP) → place fastener BELOW the hole: y = hole_y + 100
+- angle:90 (inserting LEFT) → place fastener to the RIGHT: x = hole_x + 100
+- angle:270 (inserting RIGHT) → place fastener to the LEFT: x = hole_x - 100
+
+If you emit a fastener at the same (x,y) as its hole, the animation will not work — the fastener will appear frozen at the hole with no travel motion. Always create visible separation.
 
 For fastener parts (screws, bolts, dowels), ALWAYS include an insertionTarget object:
 - targetPartId: the id of the part the fastener connects to.

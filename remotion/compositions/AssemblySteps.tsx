@@ -232,9 +232,21 @@ function computeAllPositions(
       }
     }
 
-    // Screw starts at its own (x,y) and travels to the hole
-    const x = interpolate(prog, [0, 1], [part.x, destX]);
-    const y = interpolate(prog, [0, 1], [part.y, destY]);
+    // Screw starts at its own (x,y) and travels to the hole.
+    // If Claude placed the fastener at/near the hole instead of above it,
+    // auto-compute a sensible starting position using the insertion angle.
+    let startX = part.x;
+    let startY = part.y;
+    const distToHole = Math.sqrt((part.x - destX) ** 2 + (part.y - destY) ** 2);
+    if (distToHole < 30) {
+      // Offset backward from the hole in the direction opposite to insertion
+      const angleRad = (part.insertionTarget.angle * Math.PI) / 180;
+      const offsetDist = 90;
+      startX = destX + Math.sin(angleRad) * offsetDist;
+      startY = destY - Math.cos(angleRad) * offsetDist;
+    }
+    const x = interpolate(prog, [0, 1], [startX, destX]);
+    const y = interpolate(prog, [0, 1], [startY, destY]);
 
     // Sink phase: after arriving, screw pushes further into the hole
     const sinkProgress = interpolate(adjFrame, [30, 60], [0, 1], {
@@ -748,11 +760,21 @@ function IsoCanvas({ step, frame }: { step: StepType; frame: number }) {
             holeY = tgtPos.y + tgtPart.holes[hi].hy;
           }
 
+          // Use same auto-corrected start position as the animation system
+          let srcX = part.x;
+          let srcY = part.y;
+          const distToHole = Math.sqrt((part.x - holeX) ** 2 + (part.y - holeY) ** 2);
+          if (distToHole < 30) {
+            const angleRad = (part.insertionTarget.angle * Math.PI) / 180;
+            srcX = holeX + Math.sin(angleRad) * 90;
+            srcY = holeY - Math.cos(angleRad) * 90;
+          }
+
           return (
             <InsertionArrow
               key={`arrow-${part.id}`}
-              srcX={part.x}
-              srcY={part.y}
+              srcX={srcX}
+              srcY={srcY}
               holeX={holeX}
               holeY={holeY}
               angle={part.insertionTarget.angle}
@@ -762,7 +784,7 @@ function IsoCanvas({ step, frame }: { step: StepType; frame: number }) {
           );
         })}
 
-        {/* Layer 4: Screw/dowel parts (on top of holes and arrows) */}
+        {/* Layer 4: Screw/dowel parts — labels suppressed for insertion targets (grouped below) */}
         {step.parts.map((part, partIndex) => {
           const shape = part.shape ?? inferShape(part.label);
           if (shape !== "screw" && shape !== "dowel") return null;
@@ -774,9 +796,61 @@ function IsoCanvas({ step, frame }: { step: StepType; frame: number }) {
               frame={frame}
               totalParts={step.parts.length}
               posMap={posMap}
+              suppressLabel={!!part.insertionTarget}
             />
           );
         })}
+
+        {/* Layer 4.5: Grouped fastener labels — one badge per unique label at hole cluster center */}
+        {(() => {
+          // Group insertionTarget fasteners by label, find centroid of their holes
+          const groups = new Map<string, { holeXs: number[]; holeYs: number[]; count: number }>();
+          step.parts.forEach((part) => {
+            if (!part.insertionTarget) return;
+            const tgtPart = step.parts.find((p) => p.id === part.insertionTarget!.targetPartId);
+            if (!tgtPart) return;
+            const tgtPos = posMap.get(tgtPart.id);
+            if (!tgtPos) return;
+            const hi = part.insertionTarget.holeIndex;
+            let hx = tgtPos.x;
+            let hy = tgtPos.y;
+            if (hi != null && tgtPart.holes?.[hi]) {
+              hx = tgtPos.x + tgtPart.holes[hi].hx;
+              hy = tgtPos.y + tgtPart.holes[hi].hy;
+            }
+            const existing = groups.get(part.label) ?? { holeXs: [], holeYs: [], count: 0 };
+            existing.holeXs.push(hx);
+            existing.holeYs.push(hy);
+            existing.count++;
+            groups.set(part.label, existing);
+          });
+
+          const labelAlpha = interpolate(frame, [10, 25], [0, 1], {
+            extrapolateLeft: "clamp",
+            extrapolateRight: "clamp",
+          });
+
+          return Array.from(groups.entries()).map(([label, { holeXs, holeYs, count }]) => {
+            const cx = holeXs.reduce((a, b) => a + b, 0) / holeXs.length;
+            const cy = holeYs.reduce((a, b) => a + b, 0) / holeYs.length;
+            const displayLabel = count > 1 ? `${label} ×${count}` : label;
+            return (
+              <g key={`flabel-${label}`} opacity={labelAlpha}>
+                <text
+                  x={cx}
+                  y={cy + 28}
+                  textAnchor="middle"
+                  fontSize={12}
+                  fontWeight={700}
+                  fontFamily="Inter, SF Pro Display, Helvetica Neue, Arial, sans-serif"
+                  fill="#374151"
+                >
+                  {displayLabel}
+                </text>
+              </g>
+            );
+          });
+        })()}
 
         {/* Layer 5: Tool icons */}
         {step.toolIcons?.map((toolIcon, i) => (
@@ -1370,12 +1444,14 @@ function IsoPart({
   frame,
   totalParts,
   posMap,
+  suppressLabel = false,
 }: {
   part: PartType;
   partIndex: number;
   frame: number;
   totalParts: number;
   posMap: Map<string, AnimPos>;
+  suppressLabel?: boolean;
 }) {
   const shape = part.shape ?? inferShape(part.label);
   const material = part.material ?? inferMaterial(part.label, shape);
@@ -1421,10 +1497,12 @@ function IsoPart({
 
   const fromY = shape === "screw" || shape === "dowel" ? -80 : -120;
 
+  const displayLabel = suppressLabel ? "" : part.label;
+
   // When a sprite image is available, render it instead of geometric shapes
   if (part.imageUrl) {
     const spriteW = w * 1.2;
-    const spriteH = h > 30 ? h * 1.2 : w * 1.2; // For small parts (screws etc), use width for both dimensions
+    const spriteH = h > 30 ? h * 1.2 : w * 1.2;
     return (
       <SpriteImage
         cx={finalX}
@@ -1434,7 +1512,7 @@ function IsoPart({
         imageUrl={part.imageUrl}
         opacity={opacity}
         rotation={totalRot}
-        label={part.label}
+        label={displayLabel}
         colors={colors}
       />
     );
@@ -1448,7 +1526,7 @@ function IsoPart({
         colors={colors}
         opacity={opacity}
         rotation={totalRot}
-        label={part.label}
+        label={displayLabel}
       />
     );
   }
@@ -1464,7 +1542,7 @@ function IsoPart({
         colors={colors}
         opacity={opacity}
         rotation={totalRot}
-        label={part.label}
+        label={displayLabel}
       />
     );
   }
@@ -1479,7 +1557,7 @@ function IsoPart({
       colors={colors}
       opacity={opacity}
       rotation={totalRot}
-      label={part.label}
+      label={displayLabel}
       showMotion={prog < 0.85 && prog > 0.15 && partIndex > 0}
       motionFromY={fromY}
     />
