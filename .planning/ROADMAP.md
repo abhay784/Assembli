@@ -79,7 +79,10 @@ Plans:
   1. User can upload a real IKEA-style PDF and see the pipeline progress through all stages without manual intervention
   2. The completed video is playable in the browser via an HTML5 player immediately after the job completes
   3. A job that fails at any pipeline stage shows a meaningful error state rather than hanging indefinitely
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 04-01-PLAN.md — Presigned video download utility + GET /api/jobs/[id]/video-url route + tests
+- [ ] 04-02-PLAN.md — ManualUpload video player, full-pipeline status copy, error display + human verify
 **UI hint**: yes
 
 ## Progress
@@ -92,4 +95,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | 1. Foundation | 6/6 | Complete    | 2026-04-04 |
 | 2. LLM Extraction | 4/4 | Complete    | 2026-04-04 |
 | 3. Audio and Render | 0/4 | Not started | - |
-| 4. Pipeline Integration and Output | 0/TBD | Not started | - |
+| 4. Pipeline Integration and Output | 0/2 | Not started | - |
