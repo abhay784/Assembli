@@ -13,6 +13,18 @@ const partSchema = z.object({
   x: z.number(),
   y: z.number(),
   rotationDeg: z.number(),
+  /** Part shape — drives isometric rendering. Inferred from label when absent. */
+  shape: z
+    .enum(["panel", "screw", "dowel", "leg", "bracket"])
+    .optional(),
+  /** Width of the part in diagram units (left-right). */
+  w: z.number().optional(),
+  /** Height of the part in diagram units (top-bottom / thickness). */
+  h: z.number().optional(),
+  /** Depth of the part in diagram units (front-back, drawn as isometric offset). */
+  d: z.number().optional(),
+  /** Material drives color palette. Inferred from label/shape when absent. */
+  material: z.enum(["wood", "metal", "plastic"]).optional(),
 });
 
 const stepSchema = z.object({

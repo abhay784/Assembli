@@ -9,24 +9,113 @@ import {
 } from "remotion";
 import type { RenderInput } from "../../lib/render/schema";
 
-// ─── Color palette — each part gets a distinct color with depth shades ─────────
-const PALETTE = [
-  { face: "#3B82F6", d1: "#2563EB", d2: "#1D4ED8", d3: "#1E40AF" }, // blue
-  { face: "#10B981", d1: "#059669", d2: "#047857", d3: "#065F46" }, // emerald
-  { face: "#F59E0B", d1: "#D97706", d2: "#B45309", d3: "#92400E" }, // amber
-  { face: "#EF4444", d1: "#DC2626", d2: "#B91C1C", d3: "#991B1B" }, // red
-  { face: "#8B5CF6", d1: "#7C3AED", d2: "#6D28D9", d3: "#5B21B6" }, // violet
-  { face: "#06B6D4", d1: "#0891B2", d2: "#0E7490", d3: "#155E75" }, // cyan
-  { face: "#F97316", d1: "#EA580C", d2: "#C2410C", d3: "#9A3412" }, // orange
-  { face: "#84766B", d1: "#705F54", d2: "#5D4C42", d3: "#4A3A30" }, // warm brown
-] as const;
+// ─── Isometric projection ────────────────────────────────────────────────────
+const ISO_DX = 0.55; // depth → horizontal offset
+const ISO_DY = 0.28; // depth → vertical offset (up)
+
+// ─── Material color palettes ─────────────────────────────────────────────────
+const MATERIALS = {
+  wood: {
+    top: "#EDD9B5",
+    front: "#DEC9A5",
+    right: "#C4AA84",
+    stroke: "#A08865",
+    label: "#5C4A32",
+  },
+  metal: {
+    top: "#C8D0DA",
+    front: "#A8B4C2",
+    right: "#7E8E9E",
+    stroke: "#5A6A7A",
+    label: "#374151",
+  },
+  plastic: {
+    top: "#C9E0F0",
+    front: "#A8CBE2",
+    right: "#78AAC8",
+    stroke: "#4A82A4",
+    label: "#2C5F7D",
+  },
+} as const;
+
+type MaterialKey = keyof typeof MATERIALS;
+
+// ─── Default dimensions per shape ────────────────────────────────────────────
+const SHAPE_DEFAULTS = {
+  panel: { w: 200, h: 14, d: 90 },
+  leg: { w: 24, h: 110, d: 24 },
+  screw: { w: 16, h: 16, d: 6 },
+  dowel: { w: 8, h: 36, d: 8 },
+  bracket: { w: 18, h: 18, d: 10 },
+} as const;
+
+type ShapeKey = keyof typeof SHAPE_DEFAULTS;
 
 const FPS = 30;
-// Coordinate space: Claude generates x in 0–1000, y in 0–500
 const CANVAS_W = 1000;
 const CANVAS_H = 500;
 
-// ─── Root composition ──────────────────────────────────────────────────────────
+// ─── Inference helpers ───────────────────────────────────────────────────────
+function inferShape(label: string): ShapeKey {
+  const l = label.toLowerCase();
+  if (/screw|bolt|nail|fastener/.test(l)) return "screw";
+  if (/dowel|pin|peg/.test(l)) return "dowel";
+  if (/leg/.test(l)) return "leg";
+  if (/bracket|cam|lock|hinge|fitting/.test(l)) return "bracket";
+  return "panel";
+}
+
+function inferMaterial(label: string, shape: ShapeKey): MaterialKey {
+  if (shape === "screw" || shape === "bracket") return "metal";
+  const l = label.toLowerCase();
+  if (/metal|steel|iron|aluminum/.test(l)) return "metal";
+  if (/plastic|nylon|rubber/.test(l)) return "plastic";
+  return "wood";
+}
+
+// ─── Isometric box vertex calculator ─────────────────────────────────────────
+function isoVertices(
+  cx: number,
+  cy: number,
+  w: number,
+  h: number,
+  d: number,
+) {
+  const hw = w / 2;
+  const hh = h / 2;
+  const dx = d * ISO_DX;
+  const dy = d * ISO_DY;
+
+  return {
+    // Front face (rectangle — most visible)
+    front: [
+      [cx - hw, cy - hh],
+      [cx + hw, cy - hh],
+      [cx + hw, cy + hh],
+      [cx - hw, cy + hh],
+    ],
+    // Top face (parallelogram — extends back-right from top edge)
+    top: [
+      [cx - hw, cy - hh],
+      [cx + hw, cy - hh],
+      [cx + hw + dx, cy - hh - dy],
+      [cx - hw + dx, cy - hh - dy],
+    ],
+    // Right face (parallelogram — extends back-right from right edge)
+    right: [
+      [cx + hw, cy - hh],
+      [cx + hw + dx, cy - hh - dy],
+      [cx + hw + dx, cy + hh - dy],
+      [cx + hw, cy + hh],
+    ],
+  };
+}
+
+function pointsStr(pts: number[][]): string {
+  return pts.map((p) => `${p[0]},${p[1]}`).join(" ");
+}
+
+// ─── Root composition ────────────────────────────────────────────────────────
 export const AssemblySteps: React.FC<RenderInput> = ({
   steps,
   durationsInFrames,
@@ -46,14 +135,10 @@ export const AssemblySteps: React.FC<RenderInput> = ({
     >
       {safeSteps.map((step, stepIndex) => {
         const duration = durationsInFrames[stepIndex];
-        const sequenceFrom = from;
+        const seq = from;
         from += duration;
         return (
-          <Sequence
-            key={stepIndex}
-            from={sequenceFrom}
-            durationInFrames={duration}
-          >
+          <Sequence key={stepIndex} from={seq} durationInFrames={duration}>
             <Audio src={audioFiles[stepIndex]} />
             <StepFrame
               step={step}
@@ -68,7 +153,7 @@ export const AssemblySteps: React.FC<RenderInput> = ({
   );
 };
 
-// ─── Step frame — layout: left info panel + right assembly canvas ──────────────
+// ─── Step frame — left info panel + right isometric canvas ───────────────────
 function StepFrame({
   step,
   stepIndex,
@@ -91,14 +176,13 @@ function StepFrame({
   const alpha = interpolate(frame, [0, 10], [0, 1], {
     extrapolateRight: "clamp",
   });
-
-  const progressPct = ((stepIndex + 1) / totalSteps) * 100;
+  const progress = ((stepIndex + 1) / totalSteps) * 100;
 
   return (
     <AbsoluteFill
       style={{ opacity: alpha, transform: `translateY(${slideY}px)` }}
     >
-      {/* Top accent gradient stripe */}
+      {/* Top accent stripe */}
       <div
         style={{
           position: "absolute",
@@ -106,7 +190,8 @@ function StepFrame({
           left: 0,
           right: 0,
           height: 7,
-          background: "linear-gradient(90deg, #3B82F6 0%, #8B5CF6 60%, #06B6D4 100%)",
+          background:
+            "linear-gradient(90deg, #3B82F6 0%, #8B5CF6 60%, #06B6D4 100%)",
         }}
       />
 
@@ -124,22 +209,14 @@ function StepFrame({
         <div
           style={{
             height: "100%",
-            width: `${progressPct}%`,
+            width: `${progress}%`,
             background: "linear-gradient(90deg, #3B82F6, #8B5CF6)",
             borderRadius: "0 2px 2px 0",
           }}
         />
       </div>
 
-      {/* Two-column layout */}
-      <div
-        style={{
-          display: "flex",
-          height: "100%",
-          paddingTop: 10,
-        }}
-      >
-        {/* ── Left: step info ── */}
+      <div style={{ display: "flex", height: "100%", paddingTop: 10 }}>
         <LeftPanel
           step={step}
           stepIndex={stepIndex}
@@ -147,28 +224,23 @@ function StepFrame({
           frame={frame}
         />
 
-        {/* ── Right: assembly diagram ── */}
         <div
           style={{
             flex: 1,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            padding: "44px 80px 44px 28px",
+            padding: "44px 72px 44px 28px",
           }}
         >
-          <AssemblyCanvas
-            step={step}
-            durationInFrames={durationInFrames}
-            frame={frame}
-          />
+          <IsoCanvas step={step} frame={frame} />
         </div>
       </div>
     </AbsoluteFill>
   );
 }
 
-// ─── Left info panel ───────────────────────────────────────────────────────────
+// ─── Left info panel ─────────────────────────────────────────────────────────
 function LeftPanel({
   step,
   stepIndex,
@@ -180,7 +252,6 @@ function LeftPanel({
   totalSteps: number;
   frame: number;
 }) {
-  // Stagger-in elements
   const badgeAlpha = interpolate(frame, [4, 14], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
@@ -197,8 +268,8 @@ function LeftPanel({
   return (
     <div
       style={{
-        width: 580,
-        padding: "52px 44px 44px 80px",
+        width: 540,
+        padding: "52px 40px 44px 80px",
         display: "flex",
         flexDirection: "column",
         justifyContent: "center",
@@ -219,7 +290,7 @@ function LeftPanel({
             width: 44,
             height: 44,
             borderRadius: "50%",
-            background: "linear-gradient(140deg, #3B82F6 0%, #2563EB 100%)",
+            background: "linear-gradient(140deg, #3B82F6, #2563EB)",
             color: "white",
             display: "flex",
             alignItems: "center",
@@ -245,13 +316,7 @@ function LeftPanel({
           >
             Assembly step
           </div>
-          <div
-            style={{
-              fontSize: 14,
-              fontWeight: 600,
-              color: "#475569",
-            }}
-          >
+          <div style={{ fontSize: 14, fontWeight: 600, color: "#475569" }}>
             {stepIndex + 1} of {totalSteps}
           </div>
         </div>
@@ -260,10 +325,10 @@ function LeftPanel({
       {/* Title */}
       <h1
         style={{
-          fontSize: 52,
+          fontSize: 48,
           fontWeight: 800,
           color: "#0F172A",
-          lineHeight: 1.08,
+          lineHeight: 1.1,
           margin: "0 0 18px",
           letterSpacing: "-0.03em",
           opacity: titleAlpha,
@@ -287,10 +352,10 @@ function LeftPanel({
       {/* Caption */}
       <p
         style={{
-          fontSize: 21,
+          fontSize: 20,
           color: "#4B5563",
           lineHeight: 1.65,
-          margin: "0 0 36px",
+          margin: "0 0 32px",
           fontWeight: 400,
           opacity: bodyAlpha,
         }}
@@ -298,29 +363,51 @@ function LeftPanel({
         {step.caption}
       </p>
 
-      {/* Parts count */}
+      {/* Parts summary */}
       {step.parts.length > 0 && (
         <div
           style={{
             display: "flex",
-            alignItems: "center",
+            flexWrap: "wrap",
             gap: 8,
-            marginBottom: step.tools.length > 0 || step.warnings.length > 0 ? 20 : 0,
+            marginBottom: 20,
             opacity: bodyAlpha,
           }}
         >
-          <div
-            style={{
-              width: 6,
-              height: 6,
-              borderRadius: "50%",
-              backgroundColor: "#94A3B8",
-            }}
-          />
-          <span style={{ fontSize: 14, color: "#94A3B8", fontWeight: 500 }}>
-            {step.parts.length} component
-            {step.parts.length !== 1 ? "s" : ""} in this step
-          </span>
+          {step.parts.map((part, i) => {
+            const shape = part.shape ?? inferShape(part.label);
+            const material = part.material ?? inferMaterial(part.label, shape);
+            const colors = MATERIALS[material];
+            return (
+              <span
+                key={i}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  backgroundColor: colors.top,
+                  border: `1.5px solid ${colors.stroke}`,
+                  borderRadius: 8,
+                  padding: "5px 12px",
+                  fontSize: 13,
+                  color: colors.label,
+                  fontWeight: 600,
+                }}
+              >
+                <span
+                  style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: 2,
+                    backgroundColor: colors.front,
+                    border: `1px solid ${colors.stroke}`,
+                    flexShrink: 0,
+                  }}
+                />
+                {part.label}
+              </span>
+            );
+          })}
         </div>
       )}
 
@@ -343,7 +430,6 @@ function LeftPanel({
               color: "#94A3B8",
               textTransform: "uppercase",
               letterSpacing: "0.1em",
-              marginRight: 2,
             }}
           >
             Tools
@@ -361,7 +447,7 @@ function LeftPanel({
                 fontWeight: 600,
               }}
             >
-              🔧 {tool}
+              {tool}
             </span>
           ))}
         </div>
@@ -390,7 +476,6 @@ function LeftPanel({
                 gap: 10,
               }}
             >
-              <span style={{ fontSize: 15, flexShrink: 0 }}>⚠</span>
               <span
                 style={{
                   fontSize: 14,
@@ -409,14 +494,12 @@ function LeftPanel({
   );
 }
 
-// ─── Assembly canvas — the 2.5D diagram area ───────────────────────────────────
-function AssemblyCanvas({
+// ─── Isometric SVG canvas ────────────────────────────────────────────────────
+function IsoCanvas({
   step,
-  durationInFrames,
   frame,
 }: {
   step: RenderInput["steps"][number];
-  durationInFrames: number;
   frame: number;
 }) {
   return (
@@ -432,33 +515,33 @@ function AssemblyCanvas({
         overflow: "hidden",
       }}
     >
-      {/* Dot-grid blueprint background */}
+      {/* Blueprint dot grid */}
       <div
         style={{
           position: "absolute",
           inset: 0,
           backgroundImage:
-            "radial-gradient(circle, #C4D0E0 1.2px, transparent 1.2px)",
-          backgroundSize: "36px 36px",
-          backgroundPosition: "18px 18px",
-          opacity: 0.55,
+            "radial-gradient(circle, #CBD5E1 1px, transparent 1px)",
+          backgroundSize: "32px 32px",
+          backgroundPosition: "16px 16px",
+          opacity: 0.4,
         }}
       />
 
-      {/* Subtle corner marks — drafting reference */}
+      {/* Drafting corner marks */}
       {[
-        { top: 16, left: 16 },
-        { top: 16, right: 16 },
-        { bottom: 16, left: 16 },
-        { bottom: 16, right: 16 },
+        { top: 14, left: 14 },
+        { top: 14, right: 14 },
+        { bottom: 14, left: 14 },
+        { bottom: 14, right: 14 },
       ].map((pos, i) => (
         <div
           key={i}
           style={{
             position: "absolute",
             ...pos,
-            width: 18,
-            height: 18,
+            width: 16,
+            height: 16,
             borderTop: i < 2 ? "2px solid #CBD5E1" : undefined,
             borderBottom: i >= 2 ? "2px solid #CBD5E1" : undefined,
             borderLeft: i % 2 === 0 ? "2px solid #CBD5E1" : undefined,
@@ -467,12 +550,51 @@ function AssemblyCanvas({
         />
       ))}
 
-      {/* "Assembly view" watermark */}
+      {/* SVG isometric diagram */}
+      <svg
+        viewBox={`0 0 ${CANVAS_W} ${CANVAS_H}`}
+        width="100%"
+        height="100%"
+        style={{ position: "absolute", inset: 0 }}
+      >
+        <defs>
+          <filter id="partShadow">
+            <feDropShadow
+              dx="4"
+              dy="6"
+              stdDeviation="6"
+              floodColor="#0F172A"
+              floodOpacity="0.12"
+            />
+          </filter>
+          <filter id="hwShadow">
+            <feDropShadow
+              dx="2"
+              dy="3"
+              stdDeviation="3"
+              floodColor="#0F172A"
+              floodOpacity="0.15"
+            />
+          </filter>
+        </defs>
+
+        {step.parts.map((part, partIndex) => (
+          <IsoPart
+            key={part.id}
+            part={part}
+            partIndex={partIndex}
+            frame={frame}
+            totalParts={step.parts.length}
+          />
+        ))}
+      </svg>
+
+      {/* Watermark */}
       <div
         style={{
           position: "absolute",
-          bottom: 14,
-          right: 18,
+          bottom: 12,
+          right: 16,
           fontSize: 10,
           fontWeight: 700,
           color: "#C4D0E0",
@@ -482,219 +604,423 @@ function AssemblyCanvas({
       >
         Assembly view
       </div>
-
-      {/* Parts */}
-      {step.parts.map((part, partIndex) => (
-        <IsoPart
-          key={part.id}
-          part={part}
-          color={PALETTE[partIndex % PALETTE.length]}
-          frame={frame}
-          startFrame={partIndex * 9}
-          totalParts={step.parts.length}
-        />
-      ))}
     </div>
   );
 }
 
-// ─── Isometric-style part block ────────────────────────────────────────────────
+// ─── Isometric part router ───────────────────────────────────────────────────
 function IsoPart({
   part,
-  color,
+  partIndex,
   frame,
-  startFrame,
   totalParts,
 }: {
   part: RenderInput["steps"][number]["parts"][number];
-  color: (typeof PALETTE)[number];
+  partIndex: number;
   frame: number;
-  startFrame: number;
   totalParts: number;
 }) {
-  const adjFrame = Math.max(0, frame - startFrame);
+  const shape = part.shape ?? inferShape(part.label);
+  const material = part.material ?? inferMaterial(part.label, shape);
+  const colors = MATERIALS[material];
+  const defaults = SHAPE_DEFAULTS[shape];
+  const w = part.w ?? defaults.w;
+  const h = part.h ?? defaults.h;
+  const d = part.d ?? defaults.d;
 
-  const progress = spring({
+  // Stagger: first part appears fast (the "base"), others fly in later
+  const stagger = partIndex === 0 ? 0 : 8 + partIndex * 10;
+  const adjFrame = Math.max(0, frame - stagger);
+
+  const prog = spring({
     frame: adjFrame,
     fps: FPS,
-    config: { damping: 13, stiffness: 160, mass: 1.0 },
+    config: { damping: 14, stiffness: 150, mass: 1.0 },
   });
 
-  const opacity = interpolate(adjFrame, [0, 14], [0, 1], {
+  const opacity = interpolate(adjFrame, [0, 12], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
 
-  // Approach direction: parts fly in from above and toward canvas center
-  const relX = part.x / CANVAS_W - 0.5; // −0.5 to +0.5
-  const fromX = relX * 240;
-  const fromY = -130;
+  // Approach direction: parts come from above and slightly lateral
+  const relX = part.x / CANVAS_W - 0.5;
+  const fromX = relX * 200;
+  const fromY = shape === "screw" || shape === "dowel" ? -80 : -120;
 
-  const curX = interpolate(progress, [0, 1], [part.x + fromX, part.x]);
-  const curY = interpolate(progress, [0, 1], [part.y + fromY, part.y]);
+  const curX = interpolate(prog, [0, 1], [part.x + fromX, part.x]);
+  const curY = interpolate(prog, [0, 1], [part.y + fromY, part.y]);
 
-  // Part block dimensions — scale with label length
-  const charCount = part.label.length;
-  const W = Math.max(130, Math.min(220, charCount * 12 + 36));
-  const H = 54;
-  // Extrusion depth creates the 2.5D illusion
-  const DX = 10; // right extrusion width
-  const DY = 8;  // top extrusion height
+  // Screw rotation animation
+  const screwRot =
+    shape === "screw"
+      ? interpolate(prog, [0, 1], [180, 0], {
+          extrapolateRight: "clamp",
+        })
+      : 0;
 
+  const totalRot = part.rotationDeg + screwRot;
+
+  if (shape === "screw") {
+    return (
+      <ScrewShape
+        cx={curX}
+        cy={curY}
+        colors={colors}
+        opacity={opacity}
+        rotation={totalRot}
+        label={part.label}
+      />
+    );
+  }
+
+  if (shape === "dowel") {
+    return (
+      <DowelShape
+        cx={curX}
+        cy={curY}
+        w={w}
+        h={h}
+        d={d}
+        colors={colors}
+        opacity={opacity}
+        rotation={totalRot}
+        label={part.label}
+      />
+    );
+  }
+
+  // Panel, leg, bracket — all render as isometric boxes
   return (
-    <div
-      style={{
-        position: "absolute",
-        left: curX,
-        top: curY,
-        transform: `translate(-50%, -50%) rotate(${part.rotationDeg}deg)`,
-        opacity,
-      }}
-    >
-      {/* ── Top extrusion face (lighter, skewed) ── */}
-      <div
-        style={{
-          position: "absolute",
-          left: DX * 0.6,
-          top: -DY * 0.85,
-          width: W - DX * 0.5,
-          height: DY,
-          backgroundColor: color.d1,
-          borderRadius: "6px 6px 0 0",
-          transform: "skewX(-14deg)",
-          transformOrigin: "bottom left",
-        }}
-      />
-
-      {/* ── Right extrusion face (darker, skewed) ── */}
-      <div
-        style={{
-          position: "absolute",
-          left: W - DX * 0.2,
-          top: DY * 0.45,
-          width: DX,
-          height: H - DY * 0.3,
-          backgroundColor: color.d2,
-          borderRadius: "0 6px 6px 0",
-          transform: "skewY(-14deg)",
-          transformOrigin: "top left",
-        }}
-      />
-
-      {/* ── Main front face ── */}
-      <div
-        style={{
-          position: "relative",
-          width: W,
-          height: H,
-          background: `linear-gradient(140deg, ${color.face} 0%, ${color.d1} 100%)`,
-          borderRadius: 10,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          // Stacked box-shadow creates convincing depth
-          boxShadow: [
-            `3px 3px 0 ${color.d1}`,
-            `6px 6px 0 ${color.d2}`,
-            `9px 9px 0 ${color.d3}`,
-            `0 18px 40px rgba(0,0,0,0.22)`,
-            `inset 0 1px 0 rgba(255,255,255,0.28)`,
-          ].join(", "),
-          // Offset to visually center the stacked shadows
-          transform: "translate(-4px, -4px)",
-        }}
-      >
-        {/* Part label */}
-        <span
-          style={{
-            color: "white",
-            fontSize: 15,
-            fontWeight: 700,
-            letterSpacing: "0.02em",
-            textShadow: "0 1px 4px rgba(0,0,0,0.35)",
-            padding: "0 16px",
-            textAlign: "center",
-            lineHeight: 1.3,
-          }}
-        >
-          {part.label}
-        </span>
-      </div>
-
-      {/* ── Assembly arrow — shown for non-primary parts (index > 0) ── */}
-      {totalParts > 1 && (
-        <AssemblyArrow
-          frame={adjFrame}
-          partX={part.x}
-          partY={part.y}
-          canvasCX={CANVAS_W / 2}
-          canvasCY={CANVAS_H / 2}
-        />
-      )}
-    </div>
+    <IsoBoxShape
+      cx={curX}
+      cy={curY}
+      w={w}
+      h={h}
+      d={d}
+      colors={colors}
+      opacity={opacity}
+      rotation={totalRot}
+      label={part.label}
+      showMotion={prog < 0.85 && prog > 0.15 && partIndex > 0}
+      motionFromY={fromY}
+    />
   );
 }
 
-// ─── Small directional arrow indicating assembly direction ────────────────────
-function AssemblyArrow({
-  frame,
-  partX,
-  partY,
-  canvasCX,
-  canvasCY,
+// ─── Isometric box (panels, legs, brackets) ──────────────────────────────────
+function IsoBoxShape({
+  cx,
+  cy,
+  w,
+  h,
+  d,
+  colors,
+  opacity,
+  rotation,
+  label,
+  showMotion,
+  motionFromY,
 }: {
-  frame: number;
-  partX: number;
-  partY: number;
-  canvasCX: number;
-  canvasCY: number;
+  cx: number;
+  cy: number;
+  w: number;
+  h: number;
+  d: number;
+  colors: (typeof MATERIALS)[MaterialKey];
+  opacity: number;
+  rotation: number;
+  label: string;
+  showMotion: boolean;
+  motionFromY: number;
 }) {
-  const arrowOpacity = interpolate(frame, [18, 28], [0, 0.65], {
-    extrapolateLeft: "clamp",
-    extrapolateRight: "clamp",
-  });
+  const verts = isoVertices(0, 0, w, h, d);
+  const dx = d * ISO_DX;
+  const dy = d * ISO_DY;
 
-  // Direction toward canvas center
-  const dx = canvasCX - partX;
-  const dy = canvasCY - partY;
-  const angle = Math.atan2(dy, dx) * (180 / Math.PI);
+  // Label position: below the front face, centered
+  const labelY = h / 2 + 22;
 
   return (
-    <div
-      style={{
-        position: "absolute",
-        left: "50%",
-        top: "50%",
-        transform: `translate(-50%, -50%) rotate(${angle}deg)`,
-        opacity: arrowOpacity,
-        pointerEvents: "none",
-      }}
+    <g
+      transform={`translate(${cx}, ${cy}) rotate(${rotation})`}
+      opacity={opacity}
+      filter="url(#partShadow)"
     >
-      {/* Arrow shaft */}
-      <div
-        style={{
-          position: "absolute",
-          left: 40,
-          top: -1,
-          width: 36,
-          height: 2,
-          backgroundColor: "#94A3B8",
-          borderRadius: 1,
-        }}
+      {/* Motion trail lines */}
+      {showMotion && (
+        <>
+          <line
+            x1={-w * 0.3}
+            y1={motionFromY * 0.15}
+            x2={-w * 0.3}
+            y2={motionFromY * 0.45}
+            stroke="#94A3B8"
+            strokeWidth={1.5}
+            strokeDasharray="4,6"
+            opacity={0.4}
+          />
+          <line
+            x1={w * 0.3}
+            y1={motionFromY * 0.15}
+            x2={w * 0.3}
+            y2={motionFromY * 0.45}
+            stroke="#94A3B8"
+            strokeWidth={1.5}
+            strokeDasharray="4,6"
+            opacity={0.4}
+          />
+        </>
+      )}
+
+      {/* Right face (darkest — draw first, back of painter order) */}
+      <polygon
+        points={pointsStr(verts.right)}
+        fill={colors.right}
+        stroke={colors.stroke}
+        strokeWidth={1.5}
+        strokeLinejoin="round"
       />
-      {/* Arrowhead */}
-      <div
-        style={{
-          position: "absolute",
-          left: 72,
-          top: -5,
-          width: 0,
-          height: 0,
-          borderTop: "6px solid transparent",
-          borderBottom: "6px solid transparent",
-          borderLeft: "10px solid #94A3B8",
-        }}
+      {/* Top face (lightest) */}
+      <polygon
+        points={pointsStr(verts.top)}
+        fill={colors.top}
+        stroke={colors.stroke}
+        strokeWidth={1.5}
+        strokeLinejoin="round"
       />
-    </div>
+      {/* Front face (main visible) */}
+      <polygon
+        points={pointsStr(verts.front)}
+        fill={colors.front}
+        stroke={colors.stroke}
+        strokeWidth={1.5}
+        strokeLinejoin="round"
+      />
+
+      {/* Wood grain lines on front face (if wood and large enough) */}
+      {colors === MATERIALS.wood && w > 60 && (
+        <>
+          <line
+            x1={-w * 0.35}
+            y1={-h * 0.1}
+            x2={w * 0.35}
+            y2={-h * 0.1}
+            stroke={colors.stroke}
+            strokeWidth={0.5}
+            opacity={0.3}
+          />
+          <line
+            x1={-w * 0.3}
+            y1={h * 0.15}
+            x2={w * 0.3}
+            y2={h * 0.15}
+            stroke={colors.stroke}
+            strokeWidth={0.5}
+            opacity={0.25}
+          />
+        </>
+      )}
+
+      {/* Label */}
+      <text
+        x={dx / 2}
+        y={labelY}
+        textAnchor="middle"
+        fontSize={13}
+        fontWeight={700}
+        fontFamily="Inter, SF Pro Display, Helvetica Neue, Arial, sans-serif"
+        fill={colors.label}
+        letterSpacing="0.02em"
+      >
+        {label}
+      </text>
+      {/* Label connector line */}
+      <line
+        x1={dx / 2}
+        y1={h / 2 + 2}
+        x2={dx / 2}
+        y2={labelY - 14}
+        stroke={colors.stroke}
+        strokeWidth={1}
+        opacity={0.35}
+      />
+    </g>
+  );
+}
+
+// ─── Screw shape ─────────────────────────────────────────────────────────────
+function ScrewShape({
+  cx,
+  cy,
+  colors,
+  opacity,
+  rotation,
+  label,
+}: {
+  cx: number;
+  cy: number;
+  colors: (typeof MATERIALS)[MaterialKey];
+  opacity: number;
+  rotation: number;
+  label: string;
+}) {
+  const R = 12; // head radius
+  const shaftLen = 18;
+
+  return (
+    <g
+      transform={`translate(${cx}, ${cy}) rotate(${rotation})`}
+      opacity={opacity}
+      filter="url(#hwShadow)"
+    >
+      {/* Shaft */}
+      <rect
+        x={-2.5}
+        y={R * 0.4}
+        width={5}
+        height={shaftLen}
+        fill={colors.right}
+        stroke={colors.stroke}
+        strokeWidth={1}
+        rx={1.5}
+      />
+      {/* Thread lines on shaft */}
+      {[0.3, 0.5, 0.7, 0.9].map((t) => (
+        <line
+          key={t}
+          x1={-3.5}
+          y1={R * 0.4 + shaftLen * t}
+          x2={3.5}
+          y2={R * 0.4 + shaftLen * t - 2}
+          stroke={colors.stroke}
+          strokeWidth={0.7}
+          opacity={0.5}
+        />
+      ))}
+      {/* Screw head */}
+      <circle
+        r={R}
+        fill={colors.top}
+        stroke={colors.stroke}
+        strokeWidth={1.5}
+      />
+      {/* Phillips cross */}
+      <line
+        x1={-R * 0.5}
+        y1={0}
+        x2={R * 0.5}
+        y2={0}
+        stroke={colors.stroke}
+        strokeWidth={2}
+        strokeLinecap="round"
+      />
+      <line
+        x1={0}
+        y1={-R * 0.5}
+        x2={0}
+        y2={R * 0.5}
+        stroke={colors.stroke}
+        strokeWidth={2}
+        strokeLinecap="round"
+      />
+      {/* Highlight */}
+      <circle r={R * 0.3} cx={-R * 0.2} cy={-R * 0.2} fill="white" opacity={0.3} />
+
+      {/* Label */}
+      <text
+        x={0}
+        y={R + shaftLen + 18}
+        textAnchor="middle"
+        fontSize={12}
+        fontWeight={700}
+        fontFamily="Inter, SF Pro Display, Helvetica Neue, Arial, sans-serif"
+        fill={colors.label}
+      >
+        {label}
+      </text>
+    </g>
+  );
+}
+
+// ─── Dowel shape ─────────────────────────────────────────────────────────────
+function DowelShape({
+  cx,
+  cy,
+  w,
+  h,
+  d,
+  colors,
+  opacity,
+  rotation,
+  label,
+}: {
+  cx: number;
+  cy: number;
+  w: number;
+  h: number;
+  d: number;
+  colors: (typeof MATERIALS)[MaterialKey];
+  opacity: number;
+  rotation: number;
+  label: string;
+}) {
+  const bodyW = Math.max(w, 8);
+  const bodyH = Math.max(h, 30);
+
+  return (
+    <g
+      transform={`translate(${cx}, ${cy}) rotate(${rotation})`}
+      opacity={opacity}
+      filter="url(#hwShadow)"
+    >
+      {/* Dowel body — rounded rectangle (capsule) */}
+      <rect
+        x={-bodyW / 2}
+        y={-bodyH / 2}
+        width={bodyW}
+        height={bodyH}
+        fill={colors.front}
+        stroke={colors.stroke}
+        strokeWidth={1.5}
+        rx={bodyW / 2}
+      />
+      {/* Ridge lines */}
+      {[-0.25, 0, 0.25].map((t) => (
+        <line
+          key={t}
+          x1={-bodyW / 2 + 1}
+          y1={t * bodyH}
+          x2={bodyW / 2 - 1}
+          y2={t * bodyH}
+          stroke={colors.stroke}
+          strokeWidth={0.7}
+          opacity={0.35}
+        />
+      ))}
+      {/* Highlight streak */}
+      <rect
+        x={-bodyW * 0.15}
+        y={-bodyH / 2 + 2}
+        width={bodyW * 0.2}
+        height={bodyH - 4}
+        fill="white"
+        opacity={0.2}
+        rx={2}
+      />
+
+      {/* Label */}
+      <text
+        x={0}
+        y={bodyH / 2 + 18}
+        textAnchor="middle"
+        fontSize={12}
+        fontWeight={700}
+        fontFamily="Inter, SF Pro Display, Helvetica Neue, Arial, sans-serif"
+        fill={colors.label}
+      >
+        {label}
+      </text>
+    </g>
   );
 }
