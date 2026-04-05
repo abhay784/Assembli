@@ -8,6 +8,7 @@ import { getAudioDurationSecondsFromBuffer } from "../lib/audio/duration";
 import { extractPartsInventory } from "../lib/claude/extract-parts-inventory";
 import { extractSceneFromPdfBuffer } from "../lib/claude/extract-scene";
 import { rasterizePartSprites } from "../lib/pdf/rasterize-parts";
+import { rasterizeStepPages } from "../lib/pdf/rasterize-step-pages";
 import { assertPdfPagePreflight } from "../lib/pdf/preflight";
 import type { JobPayload } from "../lib/queue";
 import { renderInputSchema } from "../lib/render/schema";
@@ -21,6 +22,7 @@ export async function runAssembliPipeline(
 ): Promise<{ sceneKey: string; videoKey: string }> {
   let workDir: string | undefined;
   let publishedAudioDir: string | undefined;
+  let publishedStepPagesDir: string | undefined;
 
   const buffer = await getObjectBuffer({ key: payload.s3Key });
   const pdfBuffer = Buffer.from(buffer);
@@ -112,6 +114,84 @@ export async function runAssembliPipeline(
     body: JSON.stringify(scene, null, 2),
   });
 
+  // ── Phase 1.5: Rasterize step background pages ───────────────────────────
+  let stepPagesDir: string | undefined;
+  try {
+    // Collect unique pageIndex values from extracted steps
+    const pageIndices = [
+      ...new Set(
+        scene.steps
+          .map((s) => s.pageIndex)
+          .filter((idx): idx is number => idx !== undefined),
+      ),
+    ];
+
+    if (pageIndices.length > 0) {
+      stepPagesDir = await fs.mkdtemp(
+        path.join(os.tmpdir(), "assembli-step-pages-"),
+      );
+      const tempPdfPath = path.join(stepPagesDir, "manual.pdf");
+      await fs.writeFile(tempPdfPath, pdfBuffer);
+
+      const rasters = await rasterizeStepPages({
+        pdfPath: tempPdfPath,
+        pageIndices,
+        outputDir: path.join(stepPagesDir, "pages"),
+      });
+
+      if (rasters.length > 0) {
+        const publicStepPagesRel = `__assembli-step-pages/${payload.jobId}`;
+        publishedStepPagesDir = path.join(
+          process.cwd(),
+          "remotion/public",
+          publicStepPagesRel,
+        );
+        await fs.mkdir(publishedStepPagesDir, { recursive: true });
+
+        // Build pageIndex → URL map
+        const pageUrlMap = new Map<number, string>();
+        for (const raster of rasters) {
+          const filename = `page-${raster.pageIndex}.png`;
+          await fs.copyFile(
+            raster.localPath,
+            path.join(publishedStepPagesDir, filename),
+          );
+          pageUrlMap.set(
+            raster.pageIndex,
+            publicStaticFileUrl(`${publicStepPagesRel}/${filename}`),
+          );
+
+          // Also upload to S3 for persistence
+          const s3Key = `uploads/${payload.jobId}/step-pages/${filename}`;
+          const pageBytes = await fs.readFile(raster.localPath);
+          await putObjectBytes({
+            key: s3Key,
+            body: Buffer.from(pageBytes),
+            contentType: "image/png",
+          });
+        }
+
+        // Inject backgroundImageUrl into each step that has a pageIndex
+        for (const step of scene.steps) {
+          if (step.pageIndex !== undefined) {
+            const url = pageUrlMap.get(step.pageIndex);
+            if (url) {
+              (step as Record<string, unknown>).backgroundImageUrl = url;
+            }
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("Step page rasterization failed (non-fatal):", err);
+  } finally {
+    if (stepPagesDir) {
+      await fs
+        .rm(stepPagesDir, { recursive: true, force: true })
+        .catch(() => {});
+    }
+  }
+
   try {
     workDir = await fs.mkdtemp(path.join(os.tmpdir(), "assembli-job-"));
     const audioDir = path.join(workDir, "audio");
@@ -174,6 +254,11 @@ export async function runAssembliPipeline(
     if (publishedSpritesDir) {
       await fs
         .rm(publishedSpritesDir, { recursive: true, force: true })
+        .catch(() => {});
+    }
+    if (publishedStepPagesDir) {
+      await fs
+        .rm(publishedStepPagesDir, { recursive: true, force: true })
         .catch(() => {});
     }
     if (workDir) {

@@ -603,18 +603,32 @@ function IsoCanvas({ step, frame }: { step: StepType; frame: number }) {
         aspectRatio: `${CANVAS_W} / ${CANVAS_H}`,
       }}
     >
-      {/* Blueprint dot grid */}
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          backgroundImage:
-            "radial-gradient(circle, #CBD5E1 1px, transparent 1px)",
-          backgroundSize: "32px 32px",
-          backgroundPosition: "16px 16px",
-          opacity: 0.4,
-        }}
-      />
+      {/* Background: manual diagram page or dot grid fallback */}
+      {step.backgroundImageUrl ? (
+        <Img
+          src={step.backgroundImageUrl}
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "contain",
+            opacity: 0.35,
+          }}
+        />
+      ) : (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            backgroundImage:
+              "radial-gradient(circle, #CBD5E1 1px, transparent 1px)",
+            backgroundSize: "32px 32px",
+            backgroundPosition: "16px 16px",
+            opacity: 0.4,
+          }}
+        />
+      )}
 
       {/* Drafting corner marks */}
       {[
