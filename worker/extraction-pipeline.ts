@@ -1,8 +1,8 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { staticFile } from "remotion";
 import { synthesizeNarrationToBuffer } from "../lib/audio/elevenlabs-client";
+import { publicStaticFileUrl } from "../lib/remotion/public-static-url";
 import { generateAndUploadStepAudio } from "../lib/audio/generate-step-audio";
 import { getAudioDurationSecondsFromBuffer } from "../lib/audio/duration";
 import { extractSceneFromPdfBuffer } from "../lib/claude/extract-scene";
@@ -55,8 +55,9 @@ export async function runAssembliPipeline(
     assertPathsContainedInDir(localPaths, workDir);
 
     // Remotion resolves <Audio src> via the bundle HTTP server. Absolute filesystem
-    // paths become root-relative URLs (404). Copy clips into remotion/public and pass
-    // staticFile() paths so the webpack server can serve them during renderMedia.
+    // paths become wrong URLs (404). Copy clips into remotion/public (webpack copies
+    // that tree to bundle/public/) and pass /public/... URLs — same as staticFile()
+    // in the browser; in Node, staticFile() omits /public so we use publicStaticFileUrl.
     const publicAudioRel = `__assembli-audio/${payload.jobId}`;
     publishedAudioDir = path.join(
       process.cwd(),
@@ -69,7 +70,7 @@ export async function runAssembliPipeline(
     for (const src of localPaths) {
       const base = path.basename(src);
       await fs.copyFile(src, path.join(publishedAudioDir, base));
-      audioFilesForRender.push(staticFile(`${publicAudioRel}/${base}`));
+      audioFilesForRender.push(publicStaticFileUrl(`${publicAudioRel}/${base}`));
     }
 
     const inputProps = renderInputSchema.parse({
