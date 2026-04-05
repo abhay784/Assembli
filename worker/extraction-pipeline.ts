@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { staticFile } from "remotion";
 import { synthesizeNarrationToBuffer } from "../lib/audio/elevenlabs-client";
 import { generateAndUploadStepAudio } from "../lib/audio/generate-step-audio";
 import { getAudioDurationSecondsFromBuffer } from "../lib/audio/duration";
@@ -17,6 +18,7 @@ export async function runAssembliPipeline(
   payload: JobPayload,
 ): Promise<{ sceneKey: string; videoKey: string }> {
   let workDir: string | undefined;
+  let publishedAudioDir: string | undefined;
 
   const buffer = await getObjectBuffer({ key: payload.s3Key });
   const pdfBuffer = Buffer.from(buffer);
@@ -50,13 +52,31 @@ export async function runAssembliPipeline(
       getDuration: getAudioDurationSecondsFromBuffer,
     });
 
+    assertPathsContainedInDir(localPaths, workDir);
+
+    // Remotion resolves <Audio src> via the bundle HTTP server. Absolute filesystem
+    // paths become root-relative URLs (404). Copy clips into remotion/public and pass
+    // staticFile() paths so the webpack server can serve them during renderMedia.
+    const publicAudioRel = `__assembli-audio/${payload.jobId}`;
+    publishedAudioDir = path.join(
+      process.cwd(),
+      "remotion/public",
+      publicAudioRel,
+    );
+    await fs.mkdir(publishedAudioDir, { recursive: true });
+
+    const audioFilesForRender: string[] = [];
+    for (const src of localPaths) {
+      const base = path.basename(src);
+      await fs.copyFile(src, path.join(publishedAudioDir, base));
+      audioFilesForRender.push(staticFile(`${publicAudioRel}/${base}`));
+    }
+
     const inputProps = renderInputSchema.parse({
       steps: scene.steps,
       durationsInFrames,
-      audioFiles: localPaths,
+      audioFiles: audioFilesForRender,
     });
-
-    assertPathsContainedInDir(localPaths, workDir);
 
     const outputPath = path.join(workDir, "out.mp4");
     await renderAssemblyToMp4({ inputProps, outputLocation: outputPath });
@@ -71,6 +91,11 @@ export async function runAssembliPipeline(
 
     return { sceneKey, videoKey };
   } finally {
+    if (publishedAudioDir) {
+      await fs
+        .rm(publishedAudioDir, { recursive: true, force: true })
+        .catch(() => {});
+    }
     if (workDir) {
       await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
     }

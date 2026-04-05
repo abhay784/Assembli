@@ -34,3 +34,6 @@ yarn-error.log*
 # ide
 .idea
 .vscode
+
+# worker render: copied step audio for Remotion static serving (cleaned after each job)
+remotion/public/__assembli-audio/
