@@ -2,9 +2,11 @@ import React from "react";
 import {
   AbsoluteFill,
   Audio,
+  Img,
   interpolate,
   Sequence,
   spring,
+  staticFile,
   useCurrentFrame,
 } from "remotion";
 import type { RenderInput } from "../../lib/render/schema";
@@ -1263,6 +1265,26 @@ function DetailInset({
               const h = part.h ?? defaults.h;
               const d = part.d ?? defaults.d;
 
+              // Sprite image takes priority over geometric shapes
+              if (part.imageUrl) {
+                const spriteW = w * 1.2;
+                const spriteH = h > 30 ? h * 1.2 : w * 1.2;
+                return (
+                  <SpriteImage
+                    key={`inset-${part.id}`}
+                    cx={pos.x}
+                    cy={pos.y}
+                    w={spriteW}
+                    h={spriteH}
+                    imageUrl={part.imageUrl}
+                    opacity={1}
+                    rotation={part.rotationDeg}
+                    label=""
+                    colors={colors}
+                  />
+                );
+              }
+
               if (shape === "screw") {
                 return (
                   <ScrewShape
@@ -1399,6 +1421,25 @@ function IsoPart({
 
   const fromY = shape === "screw" || shape === "dowel" ? -80 : -120;
 
+  // When a sprite image is available, render it instead of geometric shapes
+  if (part.imageUrl) {
+    const spriteW = w * 1.2;
+    const spriteH = h > 30 ? h * 1.2 : w * 1.2; // For small parts (screws etc), use width for both dimensions
+    return (
+      <SpriteImage
+        cx={finalX}
+        cy={finalY}
+        w={spriteW}
+        h={spriteH}
+        imageUrl={part.imageUrl}
+        opacity={opacity}
+        rotation={totalRot}
+        label={part.label}
+        colors={colors}
+      />
+    );
+  }
+
   if (shape === "screw") {
     return (
       <ScrewShape
@@ -1442,6 +1483,91 @@ function IsoPart({
       showMotion={prog < 0.85 && prog > 0.15 && partIndex > 0}
       motionFromY={fromY}
     />
+  );
+}
+
+// ─── Sprite image (extracted part illustration from manual) ──────────────────
+function SpriteImage({
+  cx,
+  cy,
+  w,
+  h,
+  imageUrl,
+  opacity,
+  rotation,
+  label,
+  colors,
+}: {
+  cx: number;
+  cy: number;
+  w: number;
+  h: number;
+  imageUrl: string;
+  opacity: number;
+  rotation: number;
+  label: string;
+  colors: (typeof MATERIALS)[MaterialKey];
+}) {
+  const labelY = h / 2 + 22;
+
+  return (
+    <g
+      transform={`translate(${cx}, ${cy}) rotate(${rotation})`}
+      opacity={opacity}
+      filter="url(#partShadow)"
+    >
+      <foreignObject
+        x={-w / 2}
+        y={-h / 2}
+        width={w}
+        height={h}
+      >
+        <div
+          style={{
+            width: "100%",
+            height: "100%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <img
+            src={imageUrl}
+            style={{
+              maxWidth: "100%",
+              maxHeight: "100%",
+              objectFit: "contain",
+            }}
+          />
+        </div>
+      </foreignObject>
+
+      {label && (
+        <>
+          <text
+            x={0}
+            y={labelY}
+            textAnchor="middle"
+            fontSize={13}
+            fontWeight={700}
+            fontFamily="Inter, SF Pro Display, Helvetica Neue, Arial, sans-serif"
+            fill={colors.label}
+            letterSpacing="0.02em"
+          >
+            {label}
+          </text>
+          <line
+            x1={0}
+            y1={h / 2 + 2}
+            x2={0}
+            y2={labelY - 14}
+            stroke={colors.stroke}
+            strokeWidth={1}
+            opacity={0.35}
+          />
+        </>
+      )}
+    </g>
   );
 }
 

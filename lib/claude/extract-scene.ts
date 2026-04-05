@@ -88,12 +88,23 @@ function textFromMessage(message: Message): string {
 export async function extractSceneFromPdfBuffer(options: {
   pdfBuffer: Buffer;
   maxAttempts?: number;
+  /** Map of partNumber → imageUrl for extracted sprites. When provided, Claude is instructed to set imageUrl on parts matching these part numbers. */
+  spriteMap?: Map<string, string>;
 }): Promise<SceneJSON> {
   // D-08: default maxAttempts = 3 (initial try + up to 2 retries after validation failure)
   const maxAttempts = options.maxAttempts ?? 3;
   const client = new Anthropic({ apiKey: getAnthropicApiKey() });
   const model = getClaudeModel();
   const pdfBase64 = options.pdfBuffer.toString("base64");
+
+  // Build sprite reference text for the prompt
+  let spriteInstruction = "";
+  if (options.spriteMap && options.spriteMap.size > 0) {
+    const entries = Array.from(options.spriteMap.entries())
+      .map(([partNum, url]) => `  "${partNum}": "${url}"`)
+      .join(",\n");
+    spriteInstruction = `\n\nIMPORTANT — Part sprite images are available. For each part you emit, if it corresponds to one of these part numbers from the manual's hardware page, set the "imageUrl" field to the matching URL. The renderer will display the actual part illustration instead of a generic shape.\n\nAvailable part sprites:\n{\n${entries}\n}\n\nWhen a part in any step uses hardware with one of these part numbers, include: "imageUrl": "<matching URL>". Parts without a matching sprite will fall back to geometric rendering.`;
+  }
 
   const messages: MessageParam[] = [
     {
@@ -109,7 +120,7 @@ export async function extractSceneFromPdfBuffer(options: {
         },
         {
           type: "text",
-          text: "Return SceneJSON for all assembly steps in this PDF.",
+          text: `Return SceneJSON for all assembly steps in this PDF.${spriteInstruction}`,
         },
       ],
     },

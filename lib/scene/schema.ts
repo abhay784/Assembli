@@ -51,6 +51,8 @@ const partSchema = z.object({
   holes: z.array(holeSchema).optional(),
   /** ID of another part this part physically connects to — drives slide-together animation. */
   connectsTo: z.string().optional(),
+  /** URL to an extracted sprite image of this part (from the manual's hardware page). When present, the renderer uses this image instead of generic geometric shapes. */
+  imageUrl: z.string().optional(),
 });
 
 const toolIconSchema = z.object({
