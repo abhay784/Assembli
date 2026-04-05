@@ -81,7 +81,13 @@ For steps with intricate connections, include a detailInset to create a zoom cal
 - anchorX, anchorY: where to draw the magnified bubble (pick an empty area of the canvas).
 - zoom: magnification factor (optional, default 2.5).
 
-For each step, include "pageIndex" — the 0-based PDF page index that contains the diagram for that assembly step. This tells the pipeline which page to rasterize as the background image. If multiple steps come from the same page, they share the same pageIndex. Count pages starting from 0 (first page = 0). Do NOT include "backgroundImageUrl" — the pipeline injects that after rasterization.`;
+For each step, include "pageIndex" — the 0-based PDF page index that contains the diagram for that assembly step. This tells the pipeline which page to rasterize as the background image. If multiple steps come from the same page, they share the same pageIndex. Count pages starting from 0 (first page = 0). Do NOT include "backgroundImageUrl", "bgImageWidth", or "bgImageHeight" — the pipeline injects those after rasterization.
+
+BACKGROUND-MODE STEPS — For steps where a fastener (screw, bolt, cam bolt) is physically driven into a hole:
+- Set "isActiveSprite": true on exactly ONE part — the part that moves into position (almost always a screw or fastener with imageUrl set).
+- Set "pageXPct" and "pageYPct" on that same part: the destination hole position as a percentage of the PAGE dimensions (0–100). Estimate from where the hole appears in the diagram — e.g., if the hole is roughly 60% across and 40% down the page, use pageXPct:60 pageYPct:40.
+- The renderer will show the manual page as a full-opacity static background and animate ONLY the isActiveSprite part as a foreground sprite flying down into the hole.
+- Only set isActiveSprite on a part that also has imageUrl set. Do NOT set it on parts without a sprite image.`;
 
 function textFromMessage(message: Message): string {
   const parts: string[] = [];

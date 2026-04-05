@@ -583,9 +583,16 @@ function LeftPanel({
   );
 }
 
+// ─── Rendered canvas size constants (1920×1080 output, 320px sidebar) ────────
+const CANVAS_RENDERED_W = 1600;
+const CANVAS_RENDERED_H = 800;
+
 // ─── Isometric SVG canvas ────────────────────────────────────────────────────
 function IsoCanvas({ step, frame }: { step: StepType; frame: number }) {
-  const posMap = computeAllPositions(step.parts, frame);
+  const isBackgroundMode = !!step.backgroundImageUrl;
+  const posMap = isBackgroundMode
+    ? new Map<string, { x: number; y: number; prog: number; opacity: number; sinkProgress: number }>()
+    : computeAllPositions(step.parts, frame);
 
   return (
     <div
@@ -603,7 +610,7 @@ function IsoCanvas({ step, frame }: { step: StepType; frame: number }) {
         aspectRatio: `${CANVAS_W} / ${CANVAS_H}`,
       }}
     >
-      {/* Background: manual diagram page or dot grid fallback */}
+      {/* Background: manual diagram page (full opacity) or dot grid fallback */}
       {step.backgroundImageUrl ? (
         <Img
           src={step.backgroundImageUrl}
@@ -613,7 +620,7 @@ function IsoCanvas({ step, frame }: { step: StepType; frame: number }) {
             width: "100%",
             height: "100%",
             objectFit: "contain",
-            opacity: 0.35,
+            opacity: 1,
           }}
         />
       ) : (
@@ -652,7 +659,11 @@ function IsoCanvas({ step, frame }: { step: StepType; frame: number }) {
         />
       ))}
 
-      <svg
+      {/* Sprite overlay — only in background mode */}
+      {isBackgroundMode && <SpriteOverlayLayer step={step} frame={frame} />}
+
+      {/* SVG isometric rendering — suppressed in background mode */}
+      {!isBackgroundMode && <svg
         viewBox={`0 0 ${CANVAS_W} ${CANVAS_H}`}
         width="100%"
         height="100%"
@@ -885,7 +896,7 @@ function IsoCanvas({ step, frame }: { step: StepType; frame: number }) {
             frame={frame}
           />
         )}
-      </svg>
+      </svg>}
 
       <div
         style={{
@@ -901,6 +912,117 @@ function IsoCanvas({ step, frame }: { step: StepType; frame: number }) {
       >
         Assembly view
       </div>
+    </div>
+  );
+}
+
+// ─── Sprite overlay layer (background mode) ───────────────────────────────────
+function SpriteOverlayLayer({ step, frame }: { step: StepType; frame: number }) {
+  const activeParts = step.parts.filter(
+    (p) => p.isActiveSprite && p.imageUrl && p.pageXPct != null && p.pageYPct != null,
+  );
+  if (!activeParts.length) return null;
+
+  // Compute letterbox bounds for objectFit:contain
+  const imgW = step.bgImageWidth ?? 794;    // A4 at 96dpi fallback
+  const imgH = step.bgImageHeight ?? 1123;
+  const imgAspect = imgW / imgH;
+  const containerAspect = CANVAS_RENDERED_W / CANVAS_RENDERED_H;
+
+  let displayW: number, displayH: number, offsetX: number, offsetY: number;
+  if (imgAspect > containerAspect) {
+    // Landscape image — letterboxed (bars top/bottom)
+    displayW = CANVAS_RENDERED_W;
+    displayH = CANVAS_RENDERED_W / imgAspect;
+    offsetX = 0;
+    offsetY = (CANVAS_RENDERED_H - displayH) / 2;
+  } else {
+    // Portrait image — pillarboxed (bars left/right)
+    displayH = CANVAS_RENDERED_H;
+    displayW = CANVAS_RENDERED_H * imgAspect;
+    offsetX = (CANVAS_RENDERED_W - displayW) / 2;
+    offsetY = 0;
+  }
+
+  return (
+    <div style={{ position: "absolute", inset: 0 }}>
+      {activeParts.map((part) => (
+        <ScrewSpriteOverlay
+          key={part.id}
+          part={part}
+          frame={frame}
+          displayW={displayW}
+          displayH={displayH}
+          offsetX={offsetX}
+          offsetY={offsetY}
+        />
+      ))}
+    </div>
+  );
+}
+
+// ─── Animated screw/fastener sprite over background image ─────────────────────
+function ScrewSpriteOverlay({
+  part,
+  frame,
+  displayW,
+  displayH,
+  offsetX,
+  offsetY,
+}: {
+  part: PartType;
+  frame: number;
+  displayW: number;
+  displayH: number;
+  offsetX: number;
+  offsetY: number;
+}) {
+  // Destination: hole position in container-pixel coordinates
+  const destX = offsetX + ((part.pageXPct ?? 50) / 100) * displayW;
+  const destY = offsetY + ((part.pageYPct ?? 50) / 100) * displayH;
+
+  // Start: 15% of display height above the hole
+  const liftPx = displayH * 0.15;
+  const startY = destY - liftPx;
+
+  // Travel spring — same config as existing screw insertion
+  const prog = spring({
+    frame,
+    fps: FPS,
+    config: { damping: 18, stiffness: 80, mass: 1.2 },
+  });
+  const opacity = interpolate(frame, [0, 12], [0, 1], {
+    extrapolateRight: "clamp",
+  });
+  const currentY = interpolate(prog, [0, 1], [startY, destY]);
+
+  // Subtle fastening rotation: one full turn as the screw sinks
+  const sinkProg = interpolate(frame, [30, 60], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  const rotation = sinkProg * 360;
+
+  // Sprite size: 5% of displayed image width, minimum 24px
+  const spriteSize = Math.max(24, displayW * 0.05);
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: destX - spriteSize / 2,
+        top: currentY - spriteSize / 2,
+        width: spriteSize,
+        height: spriteSize,
+        opacity,
+        transform: `rotate(${rotation}deg)`,
+        filter: "drop-shadow(2px 4px 6px rgba(0,0,0,0.5))",
+      }}
+    >
+      <img
+        src={part.imageUrl}
+        style={{ width: "100%", height: "100%", objectFit: "contain" }}
+      />
     </div>
   );
 }

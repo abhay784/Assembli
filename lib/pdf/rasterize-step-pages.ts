@@ -13,6 +13,10 @@ export interface StepPageRaster {
   pageIndex: number;
   /** Local filesystem path to the rasterized PNG. */
   localPath: string;
+  /** Pixel width of the rasterized image. */
+  width: number;
+  /** Pixel height of the rasterized image. */
+  height: number;
 }
 
 /**
@@ -78,7 +82,23 @@ export async function rasterizeStepPages(options: {
       continue;
     }
 
-    rasters.push({ pageIndex, localPath: rasterPath });
+    // Capture image dimensions using ImageMagick identify
+    let width = 0;
+    let height = 0;
+    try {
+      const { stdout } = await execFileAsync("identify", [
+        "-format",
+        "%w %h",
+        rasterPath,
+      ]);
+      const [w, h] = stdout.trim().split(" ").map(Number);
+      width = w;
+      height = h;
+    } catch {
+      console.warn(`Could not identify dimensions of ${rasterPath}, using 0×0`);
+    }
+
+    rasters.push({ pageIndex, localPath: rasterPath, width, height });
   }
 
   return rasters;

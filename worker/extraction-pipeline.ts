@@ -148,8 +148,9 @@ export async function runAssembliPipeline(
         );
         await fs.mkdir(publishedStepPagesDir, { recursive: true });
 
-        // Build pageIndex → URL map
+        // Build pageIndex → URL map and pageIndex → dimensions map
         const pageUrlMap = new Map<number, string>();
+        const pageSizeMap = new Map<number, { w: number; h: number }>();
         for (const raster of rasters) {
           const filename = `page-${raster.pageIndex}.png`;
           await fs.copyFile(
@@ -160,6 +161,9 @@ export async function runAssembliPipeline(
             raster.pageIndex,
             publicStaticFileUrl(`${publicStepPagesRel}/${filename}`),
           );
+          if (raster.width > 0 && raster.height > 0) {
+            pageSizeMap.set(raster.pageIndex, { w: raster.width, h: raster.height });
+          }
 
           // Also upload to S3 for persistence
           const s3Key = `uploads/${payload.jobId}/step-pages/${filename}`;
@@ -171,12 +175,17 @@ export async function runAssembliPipeline(
           });
         }
 
-        // Inject backgroundImageUrl into each step that has a pageIndex
+        // Inject backgroundImageUrl and bgImageWidth/bgImageHeight into each step
         for (const step of scene.steps) {
           if (step.pageIndex !== undefined) {
             const url = pageUrlMap.get(step.pageIndex);
             if (url) {
               (step as Record<string, unknown>).backgroundImageUrl = url;
+            }
+            const size = pageSizeMap.get(step.pageIndex);
+            if (size) {
+              (step as Record<string, unknown>).bgImageWidth = size.w;
+              (step as Record<string, unknown>).bgImageHeight = size.h;
             }
           }
         }
