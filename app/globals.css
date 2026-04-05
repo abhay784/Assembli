@@ -136,3 +136,43 @@ body {
     @apply font-sans;
   }
 }
+
+/* Landing: soft mesh behind the home page (light + dark) */
+@layer utilities {
+  .bg-landing {
+    background-color: oklch(0.985 0.004 250);
+    background-image: radial-gradient(
+        ellipse 100% 70% at 50% -30%,
+        oklch(0.9 0.055 195 / 0.45),
+        transparent 58%
+      ),
+      radial-gradient(
+        ellipse 70% 50% at 100% 0%,
+        oklch(0.93 0.04 250 / 0.5),
+        transparent 52%
+      ),
+      radial-gradient(
+        ellipse 55% 45% at 0% 100%,
+        oklch(0.94 0.035 200 / 0.4),
+        transparent 50%
+      );
+  }
+  .dark .bg-landing {
+    background-color: oklch(0.145 0.01 250);
+    background-image: radial-gradient(
+        ellipse 100% 70% at 50% -30%,
+        oklch(0.32 0.09 195 / 0.45),
+        transparent 58%
+      ),
+      radial-gradient(
+        ellipse 70% 50% at 100% 0%,
+        oklch(0.22 0.06 250 / 0.35),
+        transparent 52%
+      ),
+      radial-gradient(
+        ellipse 55% 45% at 0% 100%,
+        oklch(0.25 0.05 200 / 0.3),
+        transparent 50%
+      );
+  }
+}

@@ -1,3 +1,8 @@
 export { mockScene } from "./mock";
 export { sceneJsonSchema } from "./json-schema";
-export { sceneSchema, type SceneJSON } from "./schema";
+export {
+  sceneSchema,
+  stepPartUsageSchema,
+  type SceneJSON,
+  type StepPartUsage,
+} from "./schema";

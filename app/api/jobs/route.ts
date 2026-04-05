@@ -44,9 +44,14 @@ export async function POST(request: Request) {
     const signed = await presignManualUpload({ key, contentType });
     uploadUrl = signed.url;
     expiresIn = signed.expiresIn;
-  } catch {
+  } catch (err) {
+    console.error("[POST /api/jobs] presign failed:", err);
+    const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json(
-      { error: "Could not prepare upload." },
+      {
+        error: "Could not prepare upload.",
+        ...(process.env.NODE_ENV === "development" ? { details: message } : {}),
+      },
       { status: 500 },
     );
   }

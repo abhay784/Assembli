@@ -33,6 +33,13 @@ Requirements for initial release. Each maps to roadmap phases.
 
 - [ ] **OUTPUT-01**: User can preview the completed video in the browser
 
+### Assembly tracking
+
+- [ ] **TRACK-01**: System derives total required quantity for each hardware part from extracted scene data (`partsUsed` per step)
+- [ ] **TRACK-02**: System tracks used-so-far quantity per part based on user-marked completed steps
+- [ ] **TRACK-03**: System displays per-part progress (used / total and remaining) in a dedicated panel
+- [ ] **TRACK-04**: User can mark a step complete or undo; part usage updates accordingly (client-side state for MVP)
+
 ## v2 Requirements
 
 Deferred to future release. Tracked but not in current roadmap.

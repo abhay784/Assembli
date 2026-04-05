@@ -15,6 +15,15 @@ const partSchema = z.object({
   rotationDeg: z.number(),
 });
 
+/** Hardware / consumable usage for a step (TRACK-*). Distinct from animated `parts`. */
+export const stepPartUsageSchema = z.object({
+  partCode: z.string().min(1),
+  quantity: z.number().int().positive(),
+  partName: z.string().nullable().optional(),
+});
+
+export type StepPartUsage = z.infer<typeof stepPartUsageSchema>;
+
 const stepSchema = z.object({
   title: z.string(),
   caption: z.string(),
@@ -22,6 +31,7 @@ const stepSchema = z.object({
   confidence: z.number().min(0).max(1),
   tools: z.array(z.string()),
   warnings: z.array(z.string()),
+  partsUsed: z.array(stepPartUsageSchema).optional(),
 });
 
 export const sceneSchema = z

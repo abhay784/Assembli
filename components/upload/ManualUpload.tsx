@@ -2,7 +2,14 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useDropzone, type FileRejection } from "react-dropzone";
-import { AlertCircle, CheckCircle2, FileText, Loader2 } from "lucide-react";
+import {
+  AlertCircle,
+  CheckCircle2,
+  CloudUpload,
+  FileText,
+  Loader2,
+} from "lucide-react";
+import { AssemblyProgressSection } from "@/components/assembly/AssemblyProgressSection";
 import { PipelineStatus } from "@/components/pipeline/PipelineStatus";
 import { VideoResult } from "@/components/pipeline/VideoResult";
 import { MAX_PDF_BYTES } from "@/lib/constants/upload";
@@ -72,6 +79,19 @@ function formatBytes(bytes: number): string {
   const mb = bytes / (1024 * 1024);
   if (mb < 0.1) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${mb.toFixed(1)} MB`;
+}
+
+type ApiErrorPayload = { error?: string; details?: string };
+
+function devApiHint(payload: ApiErrorPayload): string {
+  if (process.env.NODE_ENV !== "development") return "";
+  const detail =
+    typeof payload.details === "string" && payload.details.length > 0
+      ? payload.details
+      : typeof payload.error === "string" && payload.error.length > 0
+        ? payload.error
+        : "";
+  return detail ? `\n\nDetails: ${detail}` : "";
 }
 
 function putFileWithProgress(
@@ -289,18 +309,12 @@ export function ManualUpload() {
 
       const sessionPayload = (await sessionResponse.json()) as
         | { jobId: string; uploadUrl: string; headers: Record<string, string> }
-        | { error?: string };
+        | ApiErrorPayload;
 
       if (!sessionResponse.ok) {
-        const apiError =
-          "error" in sessionPayload && typeof sessionPayload.error === "string"
-            ? sessionPayload.error
-            : "";
-        const devHint =
-          process.env.NODE_ENV === "development" && apiError
-            ? `\n\nDetails: ${apiError}`
-            : "";
-        setErrorMessage(`${COPY.errPresign}${devHint}`);
+        setErrorMessage(
+          `${COPY.errPresign}${devApiHint(sessionPayload as ApiErrorPayload)}`,
+        );
         return;
       }
 
@@ -331,18 +345,12 @@ export function ManualUpload() {
 
       const enqueuePayload = (await enqueueResponse.json()) as
         | { ok?: boolean; jobId?: string }
-        | { error?: string };
+        | ApiErrorPayload;
 
       if (!enqueueResponse.ok) {
-        const apiError =
-          "error" in enqueuePayload && typeof enqueuePayload.error === "string"
-            ? enqueuePayload.error
-            : "";
-        const devHint =
-          process.env.NODE_ENV === "development" && apiError
-            ? `\n\nDetails: ${apiError}`
-            : "";
-        setErrorMessage(`${COPY.errEnqueue}${devHint}`);
+        setErrorMessage(
+          `${COPY.errEnqueue}${devApiHint(enqueuePayload as ApiErrorPayload)}`,
+        );
         return;
       }
 
@@ -357,36 +365,42 @@ export function ManualUpload() {
   };
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-6">
       <div className="mx-auto w-full max-w-[640px]">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-xl font-semibold leading-[1.2]">
-              {COPY.emptyHeading}
-            </CardTitle>
-            <CardDescription className="text-base leading-normal">
-              {COPY.emptyBody}
-            </CardDescription>
+        <Card className="overflow-hidden border-border/70 shadow-lg shadow-black/[0.04] ring-1 ring-black/[0.04] dark:bg-card/80 dark:shadow-black/30 dark:ring-white/10">
+          <CardHeader className="space-y-2 border-b border-border/50 bg-muted/20 pb-5">
+            <div className="flex items-start gap-3">
+              <span className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-teal-600/15 to-emerald-600/10 text-teal-800 ring-1 ring-teal-700/15 dark:from-teal-400/15 dark:to-emerald-400/10 dark:text-teal-200 dark:ring-teal-400/20">
+                <CloudUpload className="size-5" aria-hidden />
+              </span>
+              <div className="min-w-0 space-y-1.5">
+                <CardTitle className="text-xl font-semibold leading-[1.25] tracking-tight">
+                  {COPY.emptyHeading}
+                </CardTitle>
+                <CardDescription className="text-base leading-relaxed">
+                  {COPY.emptyBody}
+                </CardDescription>
+              </div>
+            </div>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-4 pt-6">
             <div
               {...getRootProps({
                 "data-testid": "manual-dropzone",
                 className: cn(
-                  "flex min-h-[200px] flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed px-4 py-8 text-center transition-colors",
+                  "group flex min-h-[220px] flex-col items-center justify-center gap-4 rounded-xl border-2 border-dashed px-5 py-10 text-center transition-all duration-200",
                   isDragActive
-                    ? "border-neutral-900 bg-slate-100"
-                    : "border-slate-300 bg-white",
+                    ? "border-teal-600/70 bg-teal-50/80 shadow-inner dark:border-teal-400/60 dark:bg-teal-950/40"
+                    : "border-border/80 bg-card/50 hover:border-teal-600/35 hover:bg-muted/30 dark:hover:border-teal-400/25",
                   uploading && "pointer-events-none opacity-60",
                 ),
               })}
             >
               <input {...getInputProps({ id: inputId })} />
-              <FileText
-                className="size-8 text-muted-foreground"
-                aria-hidden
-              />
-              <p className="text-base leading-normal text-muted-foreground">
+              <span className="flex size-14 items-center justify-center rounded-2xl bg-muted/80 text-muted-foreground ring-1 ring-border/60 transition-colors group-hover:bg-teal-600/10 group-hover:text-teal-800 dark:group-hover:bg-teal-950/50 dark:group-hover:text-teal-200">
+                <FileText className="size-7" aria-hidden />
+              </span>
+              <p className="max-w-sm text-base leading-relaxed text-muted-foreground">
                 {isDragActive
                   ? "Release to add your manual."
                   : "Drag your PDF here, then upload when ready."}
@@ -423,13 +437,16 @@ export function ManualUpload() {
             />
 
             {file ? (
-              <div className="space-y-2 rounded-lg border border-border bg-card p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold leading-[1.4]">
+              <div className="rounded-xl border border-border/70 bg-muted/25 p-4 ring-1 ring-black/[0.03] dark:ring-white/10">
+                <div className="flex items-start gap-3">
+                  <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg bg-card text-teal-800 shadow-sm dark:text-teal-300">
+                    <FileText className="size-4" aria-hidden />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold leading-snug">
                       {file.name}
                     </p>
-                    <p className="text-base leading-normal text-muted-foreground">
+                    <p className="text-sm text-muted-foreground">
                       {formatBytes(file.size)}
                     </p>
                   </div>
@@ -446,11 +463,11 @@ export function ManualUpload() {
               </div>
             ) : null}
           </CardContent>
-          <CardFooter className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+          <CardFooter className="flex flex-col gap-3 border-t border-border/50 bg-muted/10 px-6 py-5 sm:flex-row sm:justify-end">
             <Button
               type="button"
               variant="outline"
-              className="min-h-11 w-full sm:w-auto"
+              className="min-h-11 w-full border-border/80 bg-card/80 sm:w-auto"
               onClick={handleChooseClick}
               disabled={uploading}
             >
@@ -458,7 +475,7 @@ export function ManualUpload() {
             </Button>
             <Button
               type="button"
-              className="min-h-11 w-full sm:w-auto"
+              className="min-h-11 w-full bg-teal-700 text-white shadow-md shadow-teal-900/15 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 sm:w-auto"
               onClick={handleUpload}
               disabled={!file || uploading}
             >
@@ -489,8 +506,8 @@ export function ManualUpload() {
 
       {successJobId ? (
         <div className="mx-auto flex w-full max-w-[960px] flex-col gap-8">
-          <Alert>
-            <CheckCircle2 className="size-4 text-primary" />
+          <Alert className="border-emerald-700/20 bg-emerald-50/90 text-emerald-950 dark:border-emerald-400/25 dark:bg-emerald-950/35 dark:text-emerald-50">
+            <CheckCircle2 className="size-4 text-emerald-700 dark:text-emerald-400" />
             <AlertTitle>{COPY.successTitle}</AlertTitle>
             <AlertDescription>
               <p className="font-mono text-xs text-muted-foreground">
@@ -542,17 +559,15 @@ export function ManualUpload() {
                 </Alert>
               ) : null}
 
+              {jobStatus === "completed" && sceneKey && successJobId ? (
+                <AssemblyProgressSection jobId={successJobId} />
+              ) : null}
+
               <VideoResult
                 ref={videoSectionRef}
                 videoUrl={videoUrl}
                 jobCompleted={jobStatus === "completed"}
               />
-
-              {jobStatus === "completed" && sceneKey ? (
-                <p className="break-all font-mono text-xs text-muted-foreground">
-                  {sceneKey}
-                </p>
-              ) : null}
             </>
           ) : !statusPollError ? (
             <p className="flex items-center gap-2 text-sm text-muted-foreground">

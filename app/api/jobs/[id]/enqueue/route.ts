@@ -58,9 +58,14 @@ export async function POST(
   let exists: boolean;
   try {
     exists = await objectExistsInBucket(key);
-  } catch {
+  } catch (err) {
+    console.error("[POST /api/jobs/.../enqueue] head object failed:", err);
+    const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json(
-      { error: "Could not verify upload in storage." },
+      {
+        error: "Could not verify upload in storage.",
+        ...(process.env.NODE_ENV === "development" ? { details: message } : {}),
+      },
       { status: 500 },
     );
   }
@@ -82,9 +87,14 @@ export async function POST(
       { jobId, s3Key: key, contentType, sizeBytes },
       { jobId },
     );
-  } catch {
+  } catch (err) {
+    console.error("[POST /api/jobs/.../enqueue] queue add failed:", err);
+    const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json(
-      { error: "Could not enqueue job." },
+      {
+        error: "Could not enqueue job.",
+        ...(process.env.NODE_ENV === "development" ? { details: message } : {}),
+      },
       { status: 500 },
     );
   }

@@ -34,6 +34,40 @@ describe("sceneSchema", () => {
     expect(parsed.success).toBe(false);
   });
 
+  it("accepts optional partsUsed with valid hardware entries", () => {
+    const parsed = sceneSchema.safeParse({
+      steps: [
+        {
+          title: "t",
+          caption: "c",
+          parts: [],
+          confidence: 1,
+          tools: [],
+          warnings: [],
+          partsUsed: [{ partCode: "A", quantity: 2, partName: "Bolt" }],
+        },
+      ],
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it("rejects non-positive partsUsed quantity", () => {
+    const parsed = sceneSchema.safeParse({
+      steps: [
+        {
+          title: "t",
+          caption: "c",
+          parts: [],
+          confidence: 1,
+          tools: [],
+          warnings: [],
+          partsUsed: [{ partCode: "A", quantity: 0 }],
+        },
+      ],
+    });
+    expect(parsed.success).toBe(false);
+  });
+
   it("rejects a step missing confidence", () => {
     const parsed = sceneSchema.safeParse({
       steps: [

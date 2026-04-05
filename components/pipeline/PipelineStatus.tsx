@@ -26,13 +26,13 @@ export function PipelineStatus(props: {
       aria-live="polite"
       className="space-y-4"
     >
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base font-semibold">
+      <Card className="border-border/70 shadow-md shadow-black/[0.03] ring-1 ring-black/[0.03] dark:shadow-black/20 dark:ring-white/10">
+        <CardHeader className="border-b border-border/50 bg-muted/15 pb-4">
+          <CardTitle className="text-base font-semibold tracking-tight">
             Processing your manual
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3">
+        <CardContent className="space-y-3 pt-5">
           {props.stages === null && !isTerminal && props.coarseStatus === "queued" ? (
             <div className="flex items-center gap-2 text-sm">
               <Loader2

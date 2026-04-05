@@ -10,7 +10,8 @@ import { parseModelJson } from "./parse-json-response";
 
 const SYSTEM_PROMPT = `You extract furniture assembly steps into SceneJSON. Emit only a single JSON object, no markdown.
 Schema (JSON Schema): ${JSON.stringify(sceneJsonSchema)}
-Every step must include: title, caption, parts, confidence (number 0-1), tools (string array), warnings (string array).`;
+Every step must include: title, caption, parts, confidence (number 0-1), tools (string array), warnings (string array).
+When the manual lists hardware per step (screws, dowels, cams, bolts, etc.), add optional partsUsed: an array of { partCode (short id from the manual, e.g. letter or SKU), quantity (positive integer), partName (optional human label) }. Omit partsUsed if hardware is not identifiable for that step.`;
 
 function textFromMessage(message: Message): string {
   const parts: string[] = [];

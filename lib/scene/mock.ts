@@ -13,6 +13,10 @@ export const mockScene: SceneJSON = {
       confidence: 0.92,
       tools: [],
       warnings: [],
+      partsUsed: [
+        { partCode: "C", quantity: 4, partName: "Screw" },
+        { partCode: "D", quantity: 2, partName: "Dowel" },
+      ],
     },
     {
       title: "Attach legs to shelf",
@@ -25,6 +29,10 @@ export const mockScene: SceneJSON = {
       confidence: 0.88,
       tools: ["Allen key"],
       warnings: ["Do not overtighten bolts."],
+      partsUsed: [
+        { partCode: "C", quantity: 4, partName: "Screw" },
+        { partCode: "E", quantity: 4, partName: "Cam lock" },
+      ],
     },
     {
       title: "Install back panel",
@@ -36,6 +44,10 @@ export const mockScene: SceneJSON = {
       confidence: 0.9,
       tools: ["Phillips screwdriver"],
       warnings: [],
+      partsUsed: [
+        { partCode: "C", quantity: 4, partName: "Screw" },
+        { partCode: "D", quantity: 6, partName: "Dowel" },
+      ],
     },
   ],
 };
