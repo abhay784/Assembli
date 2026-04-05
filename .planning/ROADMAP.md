@@ -63,7 +63,12 @@ Plans:
   2. The rendered video shows exploded-view style part animations per step with text caption overlays and a step counter ("Step N of M")
   3. Narration audio is audibly in sync with visual transitions — slide duration matches audio clip length, not a hardcoded value
   4. A complete MP4 file is produced and stored to S3 at the end of the render stage
-**Plans**: TBD
+**Plans**: 4 plans
+Plans:
+- [ ] 03-01-PLAN.md — Dependencies (@elevenlabs, @remotion/renderer, ffmpeg-static) + ElevenLabs client wrapper + env
+- [ ] 03-02-PLAN.md — S3 binary upload, per-step TTS upload to `uploads/{jobId}/audio/`, duration→frames utilities + tests
+- [ ] 03-03-PLAN.md — `RenderInput` Zod, `assembly` composition (audio-driven `Sequence`), worker `render-video.ts` (bundle + renderMedia)
+- [ ] 03-04-PLAN.md — Full worker pipeline, path guard, `videoKey` on returnvalue + GET API + ManualUpload + mocked tests
 **UI hint**: yes
 
 ### Phase 4: Pipeline Integration and Output
@@ -86,5 +91,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 |-------|----------------|--------|-----------|
 | 1. Foundation | 6/6 | Complete    | 2026-04-04 |
 | 2. LLM Extraction | 4/4 | Complete    | 2026-04-04 |
-| 3. Audio and Render | 0/TBD | Not started | - |
+| 3. Audio and Render | 0/4 | Not started | - |
 | 4. Pipeline Integration and Output | 0/TBD | Not started | - |
