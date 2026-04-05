@@ -26,6 +26,7 @@ describe("synthesizeNarrationToBuffer", () => {
     vi.clearAllMocks();
     delete process.env.ELEVENLABS_API_KEY;
     delete process.env.ELEVENLABS_VOICE_ID;
+    delete process.env.ASSEMBLI_PLACEHOLDER_AUDIO;
   });
 
   it("returns a buffer on success", async () => {
@@ -47,6 +48,13 @@ describe("synthesizeNarrationToBuffer", () => {
     await expect(synthesizeNarrationToBuffer("Hi")).rejects.toThrow(
       /ELEVENLABS_API_KEY/,
     );
+  });
+
+  it("uses local silence MP3 when ASSEMBLI_PLACEHOLDER_AUDIO is true", async () => {
+    process.env.ASSEMBLI_PLACEHOLDER_AUDIO = "true";
+    const out = await synthesizeNarrationToBuffer("Any narration text.");
+    expect(out.length).toBeGreaterThan(100);
+    expect(mockConvert).not.toHaveBeenCalled();
   });
 
   it("throws when text is too long", async () => {

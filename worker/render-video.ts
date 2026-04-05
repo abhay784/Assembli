@@ -16,6 +16,7 @@ export async function renderAssemblyToMp4(params: {
   const entryPoint = path.join(process.cwd(), "remotion/index.tsx");
   const serveUrl = await bundle({
     entryPoint,
+    publicDir: "remotion/public",
     webpackOverride: (config) => config,
   });
 
