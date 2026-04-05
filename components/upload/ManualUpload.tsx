@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useDropzone, type FileRejection } from "react-dropzone";
 import { AlertCircle, CheckCircle2, FileText, Loader2 } from "lucide-react";
 import { MAX_PDF_BYTES } from "@/lib/constants/upload";
@@ -46,12 +46,17 @@ const COPY = {
   errS3:
     "Upload failed before finishing. Check your connection and try again.",
   successTitle: "Manual received.",
-  successBody: "Your job is queued.",
+  successBody: "Your manual is uploaded. Processing status updates below.",
   discardTitle: "Discard this PDF?",
   discardDescriptionPrefix: "Discard selected file:",
   discardDescriptionRest: "You can choose a different file afterward.",
   discardConfirm: "Discard PDF",
   discardCancel: "Keep file",
+  statusQueued: "Queued — waiting for the worker to start…",
+  statusProcessing: "Processing — extracting steps with Claude…",
+  statusCompleted: "Done — scene JSON saved to storage.",
+  statusFailed: "Job failed",
+  statusPollError: "Could not load job status. Is the dev server running?",
 } as const;
 
 function formatBytes(bytes: number): string {
@@ -99,6 +104,12 @@ export function ManualUpload() {
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [discardOpen, setDiscardOpen] = useState(false);
+  const [jobStatus, setJobStatus] = useState<
+    "queued" | "processing" | "completed" | "failed" | null
+  >(null);
+  const [jobError, setJobError] = useState<string | null>(null);
+  const [sceneKey, setSceneKey] = useState<string | null>(null);
+  const [statusPollError, setStatusPollError] = useState<string | null>(null);
 
   const onDropAccepted = (accepted: File[]) => {
     const next = accepted[0];
@@ -106,6 +117,10 @@ export function ManualUpload() {
     setFile(next);
     setErrorMessage(null);
     setSuccessJobId(null);
+    setJobStatus(null);
+    setJobError(null);
+    setSceneKey(null);
+    setStatusPollError(null);
   };
 
   const onDropRejected = (rejections: FileRejection[]) => {
@@ -116,6 +131,10 @@ export function ManualUpload() {
       setErrorMessage(COPY.errWrongType);
     }
     setSuccessJobId(null);
+    setJobStatus(null);
+    setJobError(null);
+    setSceneKey(null);
+    setStatusPollError(null);
   };
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -127,6 +146,62 @@ export function ManualUpload() {
     onDropAccepted,
     onDropRejected,
   });
+
+  const pollIntervalRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!successJobId) {
+      setJobStatus(null);
+      setJobError(null);
+      setSceneKey(null);
+      setStatusPollError(null);
+      return;
+    }
+
+    let cancelled = false;
+    const clearPoll = () => {
+      if (pollIntervalRef.current !== null) {
+        window.clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+    };
+
+    const tick = async () => {
+      try {
+        const res = await fetch(`/api/jobs/${successJobId}`);
+        if (!res.ok) {
+          if (!cancelled) {
+            setStatusPollError(COPY.statusPollError);
+          }
+          return;
+        }
+        const body = (await res.json()) as {
+          status: "queued" | "processing" | "completed" | "failed";
+          error: string | null;
+          sceneKey: string | null;
+        };
+        if (cancelled) return;
+        setStatusPollError(null);
+        setJobStatus(body.status);
+        setJobError(body.error);
+        setSceneKey(body.sceneKey);
+        if (body.status === "completed" || body.status === "failed") {
+          clearPoll();
+        }
+      } catch {
+        if (!cancelled) {
+          setStatusPollError(COPY.statusPollError);
+        }
+      }
+    };
+
+    void tick();
+    pollIntervalRef.current = window.setInterval(tick, 2000);
+    return () => {
+      cancelled = true;
+      clearPoll();
+    };
+  }, [successJobId]);
 
   const openFilePicker = () => {
     fileInputRef.current?.click();
@@ -151,6 +226,10 @@ export function ManualUpload() {
     if (!file || uploading) return;
     setErrorMessage(null);
     setSuccessJobId(null);
+    setJobStatus(null);
+    setJobError(null);
+    setSceneKey(null);
+    setStatusPollError(null);
     setUploading(true);
     setProgress(0);
 
@@ -263,6 +342,10 @@ export function ManualUpload() {
                   setFile(next);
                   setErrorMessage(null);
                   setSuccessJobId(null);
+                  setJobStatus(null);
+                  setJobError(null);
+                  setSceneKey(null);
+                  setStatusPollError(null);
                 }
               }
               event.target.value = "";
@@ -336,8 +419,42 @@ export function ManualUpload() {
           <AlertDescription className="space-y-2">
             <p>{COPY.successBody}</p>
             <p className="font-mono text-xs text-muted-foreground">
-              {successJobId}
+              Job id: {successJobId}
             </p>
+            {statusPollError ? (
+              <p className="text-sm text-amber-800 dark:text-amber-200">
+                {statusPollError}
+              </p>
+            ) : null}
+            {jobStatus ? (
+              <div className="space-y-1 text-sm">
+                <p className="font-medium">
+                  {jobStatus === "queued"
+                    ? COPY.statusQueued
+                    : jobStatus === "processing"
+                      ? COPY.statusProcessing
+                      : jobStatus === "completed"
+                        ? COPY.statusCompleted
+                        : COPY.statusFailed}
+                </p>
+                {jobStatus === "failed" && jobError ? (
+                  <p className="text-destructive">{jobError}</p>
+                ) : null}
+                {jobStatus === "completed" && sceneKey ? (
+                  <p className="break-all font-mono text-xs text-muted-foreground">
+                    {sceneKey}
+                  </p>
+                ) : null}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                <Loader2
+                  className="mr-1 inline size-3.5 animate-spin align-middle"
+                  aria-hidden
+                />
+                Checking status…
+              </p>
+            )}
           </AlertDescription>
         </Alert>
       ) : null}

@@ -20,6 +20,7 @@ export function parseJobPayload(data: unknown): JobPayload {
 }
 
 let sharedConnection: IORedis | null = null;
+let sharedQueue: Queue | null = null;
 
 export function getRedisConnection(): IORedis {
   const url = process.env.REDIS_URL;
@@ -32,8 +33,12 @@ export function getRedisConnection(): IORedis {
   return sharedConnection;
 }
 
+/** BullMQ expects its own Redis connection (not shared with blocking consumers). */
 export function getJobQueue(): Queue {
-  return new Queue(ASSEMBLI_QUEUE, {
-    connection: getRedisConnection(),
-  });
+  if (!sharedQueue) {
+    sharedQueue = new Queue(ASSEMBLI_QUEUE, {
+      connection: getRedisConnection().duplicate(),
+    });
+  }
+  return sharedQueue;
 }

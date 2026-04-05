@@ -12,7 +12,7 @@ if (!process.env.REDIS_URL) {
   process.exit(1);
 }
 
-const connection = getRedisConnection();
+const connection = getRedisConnection().duplicate();
 
 const worker = new Worker(
   ASSEMBLI_QUEUE,
@@ -23,6 +23,14 @@ const worker = new Worker(
   },
   { connection },
 );
+
+worker.on("active", (job) => {
+  console.log(`Job ${job.id} active (worker picked up from queue)`);
+});
+
+worker.on("completed", (job) => {
+  console.log(`Job ${job.id} completed`, job.returnvalue);
+});
 
 worker.on("failed", (job, err) => {
   console.error("Job failed", job?.id, err);
