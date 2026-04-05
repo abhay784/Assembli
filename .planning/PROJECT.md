@@ -13,6 +13,7 @@ Upload a furniture assembly manual, get back a clear, watchable explainer video 
 ### Validated
 
 - Phase 2 (2026-04-04): Claude-backed PDF → Zod-validated SceneJSON pipeline in worker (human UAT pending for real manual).
+- Phase 3 (2026-04-04): ElevenLabs TTS, audio-driven Remotion `assembly` render, S3 audio + MP4 keys, `videoKey` on GET and upload UI (human UAT pending full env E2E).
 
 ### Active
 
@@ -20,12 +21,12 @@ Upload a furniture assembly manual, get back a clear, watchable explainer video 
 - [x] System extracts and parses manual content (steps, tools, warnings, diagrams) — PDF path via worker + Claude; DOCX later
 - [x] Claude LLM simplifies instructions into structured scene JSON — `extractSceneFromPdfBuffer`
 - [x] Scene JSON follows a clean, well-defined schema (not raw generated code)
-- [ ] Predefined Remotion animation templates render scenes (parts assembling, arrows, highlights)
-- [ ] ElevenLabs generates voice narration from the step script
-- [ ] System renders final video with animations, captions, and voiceover synced together
-- [ ] Animations are simple exploded-view style (parts moving together, not 3D)
-- [ ] Output is a short (1-3 min) video with one step per slide
-- [ ] User can download or view the completed video
+- [x] Predefined Remotion animation templates render scenes (parts assembling, arrows, highlights) — `assembly` composition; Phase 4 wires browser preview
+- [x] ElevenLabs generates voice narration from the step script — worker `synthesizeNarrationToBuffer` + per-step upload
+- [x] System renders final video with animations, captions, and voiceover synced together — frame counts from probed audio duration
+- [x] Animations are simple exploded-view style (parts moving together, not 3D)
+- [x] Output is a short (1-3 min) video with one step per slide — one Sequence per step; length follows manual
+- [ ] User can download or view the completed video — Phase 4 (in-browser preview / presigned play)
 
 ### Out of Scope
 
@@ -84,4 +85,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-04 after Phase 2 (LLM Extraction) implementation*
+*Last updated: 2026-04-04 after Phase 3 (Audio and Render) implementation*

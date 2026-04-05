@@ -166,10 +166,12 @@ describe("GET /api/jobs/[id]", () => {
       status: string;
       error: string | null;
       sceneKey: string | null;
+      videoKey: string | null;
     };
     expect(body.status).toBe("queued");
     expect(body.error).toBeNull();
     expect(body.sceneKey).toBeNull();
+    expect(body.videoKey).toBeNull();
   });
 
   it("returns processing for active jobs", async () => {
@@ -195,9 +197,11 @@ describe("GET /api/jobs/[id]", () => {
     const body = (await response.json()) as {
       status: string;
       sceneKey: string | null;
+      videoKey: string | null;
     };
     expect(body.status).toBe("processing");
     expect(body.sceneKey).toBeNull();
+    expect(body.videoKey).toBeNull();
   });
 
   it("returns sceneKey when job completed with return value", async () => {
@@ -224,9 +228,43 @@ describe("GET /api/jobs/[id]", () => {
     const body = (await response.json()) as {
       status: string;
       sceneKey: string | null;
+      videoKey: string | null;
     };
     expect(body.status).toBe("completed");
     expect(body.sceneKey).toBe("uploads/job-done/scene.json");
+    expect(body.videoKey).toBeNull();
+  });
+
+  it("returns videoKey when job completed with video in return value", async () => {
+    vi.mocked(getJobQueue).mockReturnValue({
+      getJob: vi.fn(() =>
+        Promise.resolve({
+          id: "job-video",
+          timestamp: 1,
+          processedOn: 2,
+          finishedOn: 3,
+          failedReason: undefined,
+          returnvalue: {
+            sceneKey: "uploads/job-video/scene.json",
+            videoKey: "uploads/job-video/output.mp4",
+          },
+          getState: vi.fn(() => Promise.resolve("completed")),
+        }),
+      ),
+    } as never);
+
+    const response = await GET(
+      new Request("http://localhost/api/jobs/job-video"),
+      { params: Promise.resolve({ id: "job-video" }) },
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      videoKey: string | null;
+      sceneKey: string | null;
+    };
+    expect(body.videoKey).toBe("uploads/job-video/output.mp4");
+    expect(body.sceneKey).toBe("uploads/job-video/scene.json");
   });
 
   it("returns sceneKey null when completed without return value", async () => {
@@ -250,8 +288,12 @@ describe("GET /api/jobs/[id]", () => {
     );
 
     expect(response.status).toBe(200);
-    const body = (await response.json()) as { sceneKey: string | null };
+    const body = (await response.json()) as {
+      sceneKey: string | null;
+      videoKey: string | null;
+    };
     expect(body.sceneKey).toBeNull();
+    expect(body.videoKey).toBeNull();
   });
 
   it("returns 404 when the job is missing", async () => {

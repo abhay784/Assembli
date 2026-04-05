@@ -1,12 +1,21 @@
 import React from "react";
-import { AbsoluteFill, Sequence } from "remotion";
-import type { SceneJSON } from "../../lib/scene/schema";
+import {
+  AbsoluteFill,
+  Audio,
+  interpolate,
+  Sequence,
+  useCurrentFrame,
+} from "remotion";
+import type { RenderInput } from "../../lib/render/schema";
 
-const FRAMES_PER_STEP = 90;
-
-export const AssemblySteps: React.FC<SceneJSON> = ({ steps }) => {
+export const AssemblySteps: React.FC<RenderInput> = ({
+  steps,
+  durationsInFrames,
+  audioFiles,
+}) => {
   const safeSteps = steps ?? [];
 
+  let from = 0;
   return (
     <AbsoluteFill
       style={{
@@ -15,19 +24,26 @@ export const AssemblySteps: React.FC<SceneJSON> = ({ steps }) => {
         fontFamily: "system-ui, sans-serif",
       }}
     >
-      {safeSteps.map((step, stepIndex) => (
-        <Sequence
-          key={stepIndex}
-          from={stepIndex * FRAMES_PER_STEP}
-          durationInFrames={FRAMES_PER_STEP}
-        >
-          <StepFrame
-            step={step}
-            stepIndex={stepIndex}
-            totalSteps={safeSteps.length}
-          />
-        </Sequence>
-      ))}
+      {safeSteps.map((step, stepIndex) => {
+        const durationInFrames = durationsInFrames[stepIndex];
+        const sequenceFrom = from;
+        from += durationInFrames;
+        return (
+          <Sequence
+            key={stepIndex}
+            from={sequenceFrom}
+            durationInFrames={durationInFrames}
+          >
+            <Audio src={audioFiles[stepIndex]} />
+            <StepFrame
+              step={step}
+              stepIndex={stepIndex}
+              totalSteps={safeSteps.length}
+              durationInFrames={durationInFrames}
+            />
+          </Sequence>
+        );
+      })}
     </AbsoluteFill>
   );
 };
@@ -36,10 +52,12 @@ function StepFrame({
   step,
   stepIndex,
   totalSteps,
+  durationInFrames,
 }: {
-  step: SceneJSON["steps"][number];
+  step: RenderInput["steps"][number];
   stepIndex: number;
   totalSteps: number;
+  durationInFrames: number;
 }) {
   return (
     <AbsoluteFill style={{ padding: 80 }}>
@@ -66,25 +84,48 @@ function StepFrame({
         }}
       >
         {step.parts.map((part) => (
-          <div
+          <AnimatedPart
             key={`${stepIndex}-${part.id}`}
-            style={{
-              position: "absolute",
-              left: part.x,
-              top: part.y,
-              transform: `translate(-50%, -50%) rotate(${part.rotationDeg}deg)`,
-              padding: "8px 12px",
-              borderRadius: 8,
-              backgroundColor: "#e0f2fe",
-              border: "1px solid #0ea5e9",
-              fontSize: 14,
-              fontWeight: 600,
-            }}
-          >
-            {part.label}
-          </div>
+            part={part}
+            durationInFrames={durationInFrames}
+          />
         ))}
       </div>
     </AbsoluteFill>
+  );
+}
+
+function AnimatedPart({
+  part,
+  durationInFrames,
+}: {
+  part: RenderInput["steps"][number]["parts"][number];
+  durationInFrames: number;
+}) {
+  const frame = useCurrentFrame();
+  const fadeEnd = Math.max(1, Math.floor(durationInFrames * 0.2));
+  const opacity = interpolate(frame, [0, fadeEnd], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: part.x,
+        top: part.y,
+        transform: `translate(-50%, -50%) rotate(${part.rotationDeg}deg)`,
+        padding: "8px 12px",
+        borderRadius: 8,
+        backgroundColor: "#e0f2fe",
+        border: "1px solid #0ea5e9",
+        fontSize: 14,
+        fontWeight: 600,
+        opacity,
+      }}
+    >
+      {part.label}
+    </div>
   );
 }

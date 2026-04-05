@@ -1,12 +1,23 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { synthesizeNarrationToBuffer } from "../lib/audio/elevenlabs-client";
+import { generateAndUploadStepAudio } from "../lib/audio/generate-step-audio";
+import { getAudioDurationSecondsFromBuffer } from "../lib/audio/duration";
 import { extractSceneFromPdfBuffer } from "../lib/claude/extract-scene";
 import { assertPdfPagePreflight } from "../lib/pdf/preflight";
 import type { JobPayload } from "../lib/queue";
+import { renderInputSchema } from "../lib/render/schema";
 import { getObjectBuffer } from "../lib/s3/get-object";
-import { putObjectJson } from "../lib/s3/put-object";
+import { putObjectBytes, putObjectJson } from "../lib/s3/put-object";
+import { assertPathsContainedInDir } from "./path-guard";
+import { renderAssemblyToMp4 } from "./render-video";
 
-export async function runExtractionJob(
+export async function runAssembliPipeline(
   payload: JobPayload,
-): Promise<{ sceneKey: string }> {
+): Promise<{ sceneKey: string; videoKey: string }> {
+  let workDir: string | undefined;
+
   const buffer = await getObjectBuffer({ key: payload.s3Key });
   const pdfBuffer = Buffer.from(buffer);
 
@@ -25,5 +36,43 @@ export async function runExtractionJob(
     body: JSON.stringify(scene, null, 2),
   });
 
-  return { sceneKey };
+  try {
+    workDir = await fs.mkdtemp(path.join(os.tmpdir(), "assembli-job-"));
+    const audioDir = path.join(workDir, "audio");
+    await fs.mkdir(audioDir, { recursive: true });
+
+    const { durationsInFrames, localPaths } = await generateAndUploadStepAudio({
+      jobId: payload.jobId,
+      audioDir,
+      steps: scene.steps,
+      synthesize: synthesizeNarrationToBuffer,
+      putBytes: putObjectBytes,
+      getDuration: getAudioDurationSecondsFromBuffer,
+    });
+
+    const inputProps = renderInputSchema.parse({
+      steps: scene.steps,
+      durationsInFrames,
+      audioFiles: localPaths,
+    });
+
+    assertPathsContainedInDir(localPaths, workDir);
+
+    const outputPath = path.join(workDir, "out.mp4");
+    await renderAssemblyToMp4({ inputProps, outputLocation: outputPath });
+
+    const videoBytes = await fs.readFile(outputPath);
+    const videoKey = `uploads/${payload.jobId}/output.mp4`;
+    await putObjectBytes({
+      key: videoKey,
+      body: videoBytes,
+      contentType: "video/mp4",
+    });
+
+    return { sceneKey, videoKey };
+  } finally {
+    if (workDir) {
+      await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
+    }
+  }
 }

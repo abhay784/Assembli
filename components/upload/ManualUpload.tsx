@@ -111,6 +111,7 @@ export function ManualUpload() {
   >(null);
   const [jobError, setJobError] = useState<string | null>(null);
   const [sceneKey, setSceneKey] = useState<string | null>(null);
+  const [videoKey, setVideoKey] = useState<string | null>(null);
   const [statusPollError, setStatusPollError] = useState<string | null>(null);
 
   const onDropAccepted = (accepted: File[]) => {
@@ -122,6 +123,7 @@ export function ManualUpload() {
     setJobStatus(null);
     setJobError(null);
     setSceneKey(null);
+    setVideoKey(null);
     setStatusPollError(null);
   };
 
@@ -136,6 +138,7 @@ export function ManualUpload() {
     setJobStatus(null);
     setJobError(null);
     setSceneKey(null);
+    setVideoKey(null);
     setStatusPollError(null);
   };
 
@@ -156,6 +159,7 @@ export function ManualUpload() {
       setJobStatus(null);
       setJobError(null);
       setSceneKey(null);
+      setVideoKey(null);
       setStatusPollError(null);
       return;
     }
@@ -181,12 +185,14 @@ export function ManualUpload() {
           status: "queued" | "processing" | "completed" | "failed";
           error: string | null;
           sceneKey: string | null;
+          videoKey: string | null;
         };
         if (cancelled) return;
         setStatusPollError(null);
         setJobStatus(body.status);
         setJobError(body.error);
         setSceneKey(body.sceneKey);
+        setVideoKey(body.videoKey);
         if (body.status === "completed" || body.status === "failed") {
           clearPoll();
         }
@@ -231,6 +237,7 @@ export function ManualUpload() {
     setJobStatus(null);
     setJobError(null);
     setSceneKey(null);
+    setVideoKey(null);
     setStatusPollError(null);
     setUploading(true);
     setProgress(0);
@@ -376,6 +383,7 @@ export function ManualUpload() {
                   setJobStatus(null);
                   setJobError(null);
                   setSceneKey(null);
+                  setVideoKey(null);
                   setStatusPollError(null);
                 }
               }
@@ -472,9 +480,24 @@ export function ManualUpload() {
                   <p className="text-destructive">{jobError}</p>
                 ) : null}
                 {jobStatus === "completed" && sceneKey ? (
-                  <p className="break-all font-mono text-xs text-muted-foreground">
-                    {sceneKey}
-                  </p>
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold leading-[1.4]">
+                      Scene key
+                    </p>
+                    <p className="break-all font-mono text-base text-[#64748b]">
+                      {sceneKey}
+                    </p>
+                  </div>
+                ) : null}
+                {jobStatus === "completed" && videoKey ? (
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold leading-[1.4]">
+                      Video key
+                    </p>
+                    <p className="break-all font-mono text-base text-[#64748b]">
+                      {videoKey}
+                    </p>
+                  </div>
                 ) : null}
               </div>
             ) : (

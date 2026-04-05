@@ -65,10 +65,10 @@ Plans:
   4. A complete MP4 file is produced and stored to S3 at the end of the render stage
 **Plans**: 4 plans
 Plans:
-- [ ] 03-01-PLAN.md — Dependencies (@elevenlabs, @remotion/renderer, ffmpeg-static) + ElevenLabs client wrapper + env
-- [ ] 03-02-PLAN.md — S3 binary upload, per-step TTS upload to `uploads/{jobId}/audio/`, duration→frames utilities + tests
-- [ ] 03-03-PLAN.md — `RenderInput` Zod, `assembly` composition (audio-driven `Sequence`), worker `render-video.ts` (bundle + renderMedia)
-- [ ] 03-04-PLAN.md — Full worker pipeline, path guard, `videoKey` on returnvalue + GET API + ManualUpload + mocked tests
+- [x] 03-01-PLAN.md — Dependencies (@elevenlabs, @remotion/renderer, ffmpeg-static) + ElevenLabs client wrapper + env
+- [x] 03-02-PLAN.md — S3 binary upload, per-step TTS upload to `uploads/{jobId}/audio/`, duration→frames utilities + tests
+- [x] 03-03-PLAN.md — `RenderInput` Zod, `assembly` composition (audio-driven `Sequence`), worker `render-video.ts` (bundle + renderMedia)
+- [x] 03-04-PLAN.md — Full worker pipeline, path guard, `videoKey` on returnvalue + GET API + ManualUpload + mocked tests
 **UI hint**: yes
 
 ### Phase 4: Pipeline Integration and Output

@@ -11,6 +11,7 @@ export default defineConfig({
       "lib/**/*.{test,spec}.ts",
       "app/**/*.{test,spec}.ts",
       "components/**/*.{test,spec}.tsx",
+      "worker/**/*.{test,spec}.ts",
     ],
     globals: true,
   },

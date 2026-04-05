@@ -20,14 +20,14 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Video Generation
 
-- [ ] **VIDEO-01**: System renders animated step-by-step slides with exploded-view style part animations
-- [ ] **VIDEO-02**: Video includes text captions/overlays synced to narration
-- [ ] **VIDEO-03**: Video displays step counter ("Step 3 of 12")
+- [x] **VIDEO-01**: System renders animated step-by-step slides with exploded-view style part animations
+- [x] **VIDEO-02**: Video includes text captions/overlays synced to narration
+- [x] **VIDEO-03**: Video displays step counter ("Step 3 of 12")
 
 ### Audio Narration
 
-- [ ] **AUDIO-01**: ElevenLabs generates voice narration for each step
-- [ ] **AUDIO-02**: Audio narration is synced with visual transitions and animations
+- [x] **AUDIO-01**: ElevenLabs generates voice narration for each step
+- [x] **AUDIO-02**: Audio narration is synced with visual transitions and animations
 
 ### Output
 
@@ -87,14 +87,14 @@ Which phases cover which requirements. Updated during roadmap creation.
 |-------------|-------|--------|
 | INGEST-01 | Phase 1 | Pending |
 | INGEST-02 | Phase 1 | Pending |
-| EXTRACT-01 | Phase 2 | Pending |
-| EXTRACT-02 | Phase 2 | Pending |
-| EXTRACT-03 | Phase 2 | Pending |
-| VIDEO-01 | Phase 3 | Pending |
-| VIDEO-02 | Phase 3 | Pending |
-| VIDEO-03 | Phase 3 | Pending |
-| AUDIO-01 | Phase 3 | Pending |
-| AUDIO-02 | Phase 3 | Pending |
+| EXTRACT-01 | Phase 2 | Complete |
+| EXTRACT-02 | Phase 2 | Complete |
+| EXTRACT-03 | Phase 2 | Complete |
+| VIDEO-01 | Phase 3 | Complete |
+| VIDEO-02 | Phase 3 | Complete |
+| VIDEO-03 | Phase 3 | Complete |
+| AUDIO-01 | Phase 3 | Complete |
+| AUDIO-02 | Phase 3 | Complete |
 | OUTPUT-01 | Phase 4 | Pending |
 
 **Coverage:**
@@ -104,4 +104,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-04-04*
-*Last updated: 2026-04-04 after roadmap creation*
+*Last updated: 2026-04-04 after Phase 3 execution*

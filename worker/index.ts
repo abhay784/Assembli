@@ -5,7 +5,7 @@ import {
   getRedisConnection,
   parseJobPayload,
 } from "../lib/queue";
-import { runExtractionJob } from "./extraction-pipeline";
+import { runAssembliPipeline } from "./extraction-pipeline";
 
 if (!process.env.REDIS_URL) {
   console.error("REDIS_URL is required for the Assembli worker.");
@@ -19,7 +19,7 @@ const worker = new Worker(
   async (job) => {
     const payload = parseJobPayload(job.data);
     console.log(`job ${payload.jobId} s3Key length=${payload.s3Key.length}`);
-    return runExtractionJob(payload);
+    return runAssembliPipeline(payload);
   },
   { connection },
 );
@@ -29,7 +29,10 @@ worker.on("active", (job) => {
 });
 
 worker.on("completed", (job) => {
-  console.log(`Job ${job.id} completed`, job.returnvalue);
+  const rv = job.returnvalue as { sceneKey?: string; videoKey?: string } | undefined;
+  console.log(
+    `Job ${job.id} completed sceneKey=${rv?.sceneKey ?? ""} videoKey=${rv?.videoKey ?? ""}`,
+  );
 });
 
 worker.on("failed", (job, err) => {

@@ -49,11 +49,21 @@ export async function GET(
       ? (returnvalue as { sceneKey: string }).sceneKey
       : null;
 
+  const videoKey =
+    status === "completed" &&
+    returnvalue !== null &&
+    typeof returnvalue === "object" &&
+    "videoKey" in returnvalue &&
+    typeof (returnvalue as { videoKey: unknown }).videoKey === "string"
+      ? (returnvalue as { videoKey: string }).videoKey
+      : null;
+
   return NextResponse.json({
     id: job.id,
     status,
     error,
     updatedAt,
     sceneKey,
+    videoKey,
   });
 }
