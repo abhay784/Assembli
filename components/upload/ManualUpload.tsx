@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, useCallback } from "react";
 import { useDropzone, type FileRejection } from "react-dropzone";
 import { AlertCircle, CheckCircle2, FileText, Loader2 } from "lucide-react";
 import { MAX_PDF_BYTES } from "@/lib/constants/upload";
@@ -55,9 +55,9 @@ const COPY = {
   discardConfirm: "Discard PDF",
   discardCancel: "Keep file",
   statusQueued: "Queued — waiting for the worker to start…",
-  statusProcessing: "Processing — extracting steps with Claude…",
-  statusCompleted: "Done — scene JSON saved to storage.",
-  statusFailed: "Job failed",
+  statusProcessing: "Processing — extracting steps, generating audio, and rendering video…",
+  statusCompleted: "Done — your assembly video is ready.",
+  statusFailed: "Processing failed.",
   statusPollError: "Could not load job status. Is the dev server running?",
 } as const;
 
@@ -112,7 +112,9 @@ export function ManualUpload() {
   const [jobError, setJobError] = useState<string | null>(null);
   const [sceneKey, setSceneKey] = useState<string | null>(null);
   const [videoKey, setVideoKey] = useState<string | null>(null);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [statusPollError, setStatusPollError] = useState<string | null>(null);
+  const videoUrlFetchedRef = useRef(false);
 
   const onDropAccepted = (accepted: File[]) => {
     const next = accepted[0];
@@ -124,6 +126,8 @@ export function ManualUpload() {
     setJobError(null);
     setSceneKey(null);
     setVideoKey(null);
+    setVideoUrl(null);
+    videoUrlFetchedRef.current = false;
     setStatusPollError(null);
   };
 
@@ -139,6 +143,8 @@ export function ManualUpload() {
     setJobError(null);
     setSceneKey(null);
     setVideoKey(null);
+    setVideoUrl(null);
+    videoUrlFetchedRef.current = false;
     setStatusPollError(null);
   };
 
@@ -160,6 +166,8 @@ export function ManualUpload() {
       setJobError(null);
       setSceneKey(null);
       setVideoKey(null);
+      setVideoUrl(null);
+      videoUrlFetchedRef.current = false;
       setStatusPollError(null);
       return;
     }
@@ -193,6 +201,26 @@ export function ManualUpload() {
         setJobError(body.error);
         setSceneKey(body.sceneKey);
         setVideoKey(body.videoKey);
+        if (
+          body.status === "completed" &&
+          body.videoKey &&
+          !videoUrlFetchedRef.current
+        ) {
+          videoUrlFetchedRef.current = true;
+          void fetch(`/api/jobs/${successJobId}/video-url`)
+            .then((r) => {
+              if (!r.ok) return null;
+              return r.json() as Promise<{ url?: string }>;
+            })
+            .then((data) => {
+              if (data?.url && !cancelled) {
+                setVideoUrl(data.url);
+              }
+            })
+            .catch(() => {
+              // Presign fetch failed — video player won't show, but job status is still accurate
+            });
+        }
         if (body.status === "completed" || body.status === "failed") {
           clearPoll();
         }
@@ -238,6 +266,8 @@ export function ManualUpload() {
     setJobError(null);
     setSceneKey(null);
     setVideoKey(null);
+    setVideoUrl(null);
+    videoUrlFetchedRef.current = false;
     setStatusPollError(null);
     setUploading(true);
     setProgress(0);
@@ -384,6 +414,8 @@ export function ManualUpload() {
                   setJobError(null);
                   setSceneKey(null);
                   setVideoKey(null);
+                  setVideoUrl(null);
+                  videoUrlFetchedRef.current = false;
                   setStatusPollError(null);
                 }
               }
@@ -477,7 +509,9 @@ export function ManualUpload() {
                         : COPY.statusFailed}
                 </p>
                 {jobStatus === "failed" && jobError ? (
-                  <p className="text-destructive">{jobError}</p>
+                  <div className="mt-1 rounded-md bg-destructive/10 p-3">
+                    <p className="text-sm font-medium text-destructive">{jobError}</p>
+                  </div>
                 ) : null}
                 {jobStatus === "completed" && sceneKey ? (
                   <div className="space-y-1">
@@ -489,15 +523,15 @@ export function ManualUpload() {
                     </p>
                   </div>
                 ) : null}
-                {jobStatus === "completed" && videoKey ? (
-                  <div className="space-y-1">
-                    <p className="text-sm font-semibold leading-[1.4]">
-                      Video key
-                    </p>
-                    <p className="break-all font-mono text-base text-[#64748b]">
-                      {videoKey}
-                    </p>
-                  </div>
+                {jobStatus === "completed" && videoUrl ? (
+                  <video
+                    controls
+                    src={videoUrl}
+                    className="mt-2 w-full rounded-lg"
+                    aria-label="Assembly video preview"
+                  >
+                    Your browser does not support HTML5 video.
+                  </video>
                 ) : null}
               </div>
             ) : (
