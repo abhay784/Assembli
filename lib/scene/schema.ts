@@ -95,6 +95,10 @@ const stepSchema = z.object({
   toolIcons: z.array(toolIconSchema).optional(),
   /** Zoom callout showing detail of a specific area. */
   detailInset: detailInsetSchema.optional(),
+  /** 0-based PDF page index that contains the diagram for this step. Emitted by Claude; used by the pipeline to rasterize the background image. */
+  pageIndex: z.number().int().min(0).optional(),
+  /** URL to the rasterized page image. NOT emitted by Claude — injected by the pipeline after rasterization. */
+  backgroundImageUrl: z.string().optional(),
 });
 
 export const sceneSchema = z

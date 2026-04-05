@@ -79,7 +79,9 @@ Include toolIcons at the step level to show tools visually on the diagram:
 For steps with intricate connections, include a detailInset to create a zoom callout:
 - cx, cy, radius: the source region to magnify.
 - anchorX, anchorY: where to draw the magnified bubble (pick an empty area of the canvas).
-- zoom: magnification factor (optional, default 2.5).`;
+- zoom: magnification factor (optional, default 2.5).
+
+For each step, include "pageIndex" — the 0-based PDF page index that contains the diagram for that assembly step. This tells the pipeline which page to rasterize as the background image. If multiple steps come from the same page, they share the same pageIndex. Count pages starting from 0 (first page = 0). Do NOT include "backgroundImageUrl" — the pipeline injects that after rasterization.`;
 
 function textFromMessage(message: Message): string {
   const parts: string[] = [];
