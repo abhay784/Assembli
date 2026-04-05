@@ -131,7 +131,7 @@ describe("synthesizeNarrationToBuffer", () => {
       const childProcess = await import("node:child_process");
       // Make execFile invoke callback with an error to simulate ffmpeg failure
       vi.mocked(childProcess.execFile).mockImplementation(
-        ((_cmd: string, _args: string[], callback: Function) => {
+        ((_cmd: string, _args: string[], callback: childProcess.ExecFileCallback) => {
           callback(new Error("ffmpeg not found"), "", "");
         }) as typeof childProcess.execFile,
       );

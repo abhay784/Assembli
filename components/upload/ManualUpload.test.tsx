@@ -12,6 +12,12 @@ import { ManualUpload } from "./ManualUpload";
 import { MAX_PDF_BYTES } from "@/lib/constants/upload";
 import { isLikelyPdf } from "./magic-pdf";
 
+const pushMock = vi.fn();
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: pushMock }),
+}));
+
 vi.mock("./magic-pdf", () => ({
   isLikelyPdf: vi.fn(() => Promise.resolve(false)),
 }));
@@ -20,6 +26,7 @@ const isLikelyPdfMock = vi.mocked(isLikelyPdf);
 
 describe("ManualUpload", () => {
   beforeEach(() => {
+    pushMock.mockClear();
     vi.stubGlobal("fetch", vi.fn());
     vi.stubGlobal(
       "XMLHttpRequest",
@@ -113,68 +120,10 @@ describe("ManualUpload", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  describe("video preview", () => {
+  describe("after successful enqueue", () => {
     beforeEach(() => {
       isLikelyPdfMock.mockResolvedValue(true);
     });
-
-    function buildFetchMock(overrides?: {
-      jobStatus?: string;
-      jobError?: string | null;
-      videoKey?: string | null;
-    }) {
-      const status = overrides?.jobStatus ?? "completed";
-      const error = overrides?.jobError ?? null;
-      const videoKey = overrides?.videoKey ?? "uploads/j1/output.mp4";
-
-      return vi.fn((url: string) => {
-        if (url === "/api/jobs") {
-          return Promise.resolve({
-            ok: true,
-            json: () =>
-              Promise.resolve({
-                jobId: "test-job-1",
-                uploadUrl: "https://s3.example.com/upload",
-                key: "uploads/test-job-1/manual.pdf",
-                headers: { "Content-Type": "application/pdf" },
-                expiresIn: 900,
-              }),
-          });
-        }
-        if (typeof url === "string" && url.includes("/enqueue")) {
-          return Promise.resolve({
-            ok: true,
-            json: () => Promise.resolve({ ok: true }),
-          });
-        }
-        if (typeof url === "string" && url.includes("video-url")) {
-          return Promise.resolve({
-            ok: true,
-            json: () =>
-              Promise.resolve({
-                url: "https://s3.example.com/video.mp4",
-                expiresIn: 900,
-              }),
-          });
-        }
-        if (typeof url === "string" && url.includes("/api/jobs/")) {
-          return Promise.resolve({
-            ok: true,
-            json: () =>
-              Promise.resolve({
-                status,
-                error,
-                sceneKey: "uploads/j1/scene.json",
-                videoKey: status === "completed" ? videoKey : null,
-              }),
-          });
-        }
-        return Promise.resolve({
-          ok: false,
-          json: () => Promise.resolve({}),
-        });
-      });
-    }
 
     async function triggerUploadFlow() {
       const input = screen.getByTestId("manual-file-input") as HTMLInputElement;
@@ -195,49 +144,7 @@ describe("ManualUpload", () => {
       });
     }
 
-    it("renders a video element when job completes with videoKey", async () => {
-      const fetchMock = buildFetchMock();
-      vi.stubGlobal("fetch", fetchMock);
-
-      render(<ManualUpload />);
-      await triggerUploadFlow();
-
-      await waitFor(() => {
-        expect(
-          screen.getByLabelText("Assembly video preview"),
-        ).toBeInTheDocument();
-      });
-
-      const video = screen.getByLabelText(
-        "Assembly video preview",
-      ) as HTMLVideoElement;
-      expect(video.getAttribute("src")).toBe(
-        "https://s3.example.com/video.mp4",
-      );
-    });
-
-    it("fetches video-url exactly once", async () => {
-      const fetchMock = buildFetchMock();
-      vi.stubGlobal("fetch", fetchMock);
-
-      render(<ManualUpload />);
-      await triggerUploadFlow();
-
-      await waitFor(() => {
-        expect(
-          screen.getByLabelText("Assembly video preview"),
-        ).toBeInTheDocument();
-      });
-
-      const videoUrlCalls = fetchMock.mock.calls.filter(
-        ([url]: [string]) =>
-          typeof url === "string" && url.includes("video-url"),
-      );
-      expect(videoUrlCalls).toHaveLength(1);
-    });
-
-    it("does not render video when completed but videoUrl not yet loaded", async () => {
-      // Use a fetch mock where video-url returns slowly
+    it("redirects to the job assembly page", async () => {
       const fetchMock = vi.fn((url: string) => {
         if (url === "/api/jobs") {
           return Promise.resolve({
@@ -246,9 +153,7 @@ describe("ManualUpload", () => {
               Promise.resolve({
                 jobId: "test-job-1",
                 uploadUrl: "https://s3.example.com/upload",
-                key: "uploads/test-job-1/manual.pdf",
                 headers: { "Content-Type": "application/pdf" },
-                expiresIn: 900,
               }),
           });
         }
@@ -256,22 +161,6 @@ describe("ManualUpload", () => {
           return Promise.resolve({
             ok: true,
             json: () => Promise.resolve({ ok: true }),
-          });
-        }
-        if (typeof url === "string" && url.includes("video-url")) {
-          // Never resolves
-          return new Promise(() => {});
-        }
-        if (typeof url === "string" && url.includes("/api/jobs/")) {
-          return Promise.resolve({
-            ok: true,
-            json: () =>
-              Promise.resolve({
-                status: "completed",
-                error: null,
-                sceneKey: "uploads/j1/scene.json",
-                videoKey: "uploads/j1/output.mp4",
-              }),
           });
         }
         return Promise.resolve({
@@ -284,31 +173,8 @@ describe("ManualUpload", () => {
       render(<ManualUpload />);
       await triggerUploadFlow();
 
-      // Wait for job status to be completed
       await waitFor(() => {
-        expect(
-          screen.getByText(/Done.*video is ready/),
-        ).toBeInTheDocument();
-      });
-
-      // But no video element since the URL hasn't loaded
-      expect(
-        screen.queryByLabelText("Assembly video preview"),
-      ).not.toBeInTheDocument();
-    });
-
-    it("displays error text when job fails", async () => {
-      const fetchMock = buildFetchMock({
-        jobStatus: "failed",
-        jobError: "Render failed",
-      });
-      vi.stubGlobal("fetch", fetchMock);
-
-      render(<ManualUpload />);
-      await triggerUploadFlow();
-
-      await waitFor(() => {
-        expect(screen.getByText("Render failed")).toBeInTheDocument();
+        expect(pushMock).toHaveBeenCalledWith("/jobs/test-job-1");
       });
     });
   });

@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, useCallback } from "react";
+import { useId, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useDropzone, type FileRejection } from "react-dropzone";
-import { AlertCircle, CheckCircle2, FileText, Loader2 } from "lucide-react";
+import { AlertCircle, FileText, Loader2 } from "lucide-react";
 import { MAX_PDF_BYTES } from "@/lib/constants/upload";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
@@ -16,14 +17,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { BorderBeam } from "@/components/ui/border-beam";
+import { ShimmerButton } from "@/components/ui/shimmer-button";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 import { isLikelyPdf } from "./magic-pdf";
@@ -47,18 +42,11 @@ const COPY = {
     "Upload failed before finishing. Check your connection and try again.",
   errEnqueue:
     "Upload finished but processing could not be started. Check your connection and try again.",
-  successTitle: "Manual received.",
-  successBody: "Your manual is uploaded. Processing status updates below.",
   discardTitle: "Discard this PDF?",
   discardDescriptionPrefix: "Discard selected file:",
   discardDescriptionRest: "You can choose a different file afterward.",
   discardConfirm: "Discard PDF",
   discardCancel: "Keep file",
-  statusQueued: "Queued — waiting for the worker to start…",
-  statusProcessing: "Processing — extracting steps, generating audio, and rendering video…",
-  statusCompleted: "Done — your assembly video is ready.",
-  statusFailed: "Processing failed.",
-  statusPollError: "Could not load job status. Is the dev server running?",
 } as const;
 
 function formatBytes(bytes: number): string {
@@ -98,37 +86,20 @@ function putFileWithProgress(
 }
 
 export function ManualUpload() {
+  const router = useRouter();
   const inputId = useId();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [successJobId, setSuccessJobId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [discardOpen, setDiscardOpen] = useState(false);
-  const [jobStatus, setJobStatus] = useState<
-    "queued" | "processing" | "completed" | "failed" | null
-  >(null);
-  const [jobError, setJobError] = useState<string | null>(null);
-  const [sceneKey, setSceneKey] = useState<string | null>(null);
-  const [videoKey, setVideoKey] = useState<string | null>(null);
-  const [videoUrl, setVideoUrl] = useState<string | null>(null);
-  const [statusPollError, setStatusPollError] = useState<string | null>(null);
-  const videoUrlFetchedRef = useRef(false);
 
   const onDropAccepted = (accepted: File[]) => {
     const next = accepted[0];
     if (!next) return;
     setFile(next);
     setErrorMessage(null);
-    setSuccessJobId(null);
-    setJobStatus(null);
-    setJobError(null);
-    setSceneKey(null);
-    setVideoKey(null);
-    setVideoUrl(null);
-    videoUrlFetchedRef.current = false;
-    setStatusPollError(null);
   };
 
   const onDropRejected = (rejections: FileRejection[]) => {
@@ -138,14 +109,6 @@ export function ManualUpload() {
     } else {
       setErrorMessage(COPY.errWrongType);
     }
-    setSuccessJobId(null);
-    setJobStatus(null);
-    setJobError(null);
-    setSceneKey(null);
-    setVideoKey(null);
-    setVideoUrl(null);
-    videoUrlFetchedRef.current = false;
-    setStatusPollError(null);
   };
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -157,87 +120,6 @@ export function ManualUpload() {
     onDropAccepted,
     onDropRejected,
   });
-
-  const pollIntervalRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    if (!successJobId) {
-      setJobStatus(null);
-      setJobError(null);
-      setSceneKey(null);
-      setVideoKey(null);
-      setVideoUrl(null);
-      videoUrlFetchedRef.current = false;
-      setStatusPollError(null);
-      return;
-    }
-
-    let cancelled = false;
-    const clearPoll = () => {
-      if (pollIntervalRef.current !== null) {
-        window.clearInterval(pollIntervalRef.current);
-        pollIntervalRef.current = null;
-      }
-    };
-
-    const tick = async () => {
-      try {
-        const res = await fetch(`/api/jobs/${successJobId}`);
-        if (!res.ok) {
-          if (!cancelled) {
-            setStatusPollError(COPY.statusPollError);
-          }
-          return;
-        }
-        const body = (await res.json()) as {
-          status: "queued" | "processing" | "completed" | "failed";
-          error: string | null;
-          sceneKey: string | null;
-          videoKey: string | null;
-        };
-        if (cancelled) return;
-        setStatusPollError(null);
-        setJobStatus(body.status);
-        setJobError(body.error);
-        setSceneKey(body.sceneKey);
-        setVideoKey(body.videoKey);
-        if (
-          body.status === "completed" &&
-          body.videoKey &&
-          !videoUrlFetchedRef.current
-        ) {
-          videoUrlFetchedRef.current = true;
-          void fetch(`/api/jobs/${successJobId}/video-url`)
-            .then((r) => {
-              if (!r.ok) return null;
-              return r.json() as Promise<{ url?: string }>;
-            })
-            .then((data) => {
-              if (data?.url && !cancelled) {
-                setVideoUrl(data.url);
-              }
-            })
-            .catch(() => {
-              // Presign fetch failed — video player won't show, but job status is still accurate
-            });
-        }
-        if (body.status === "completed" || body.status === "failed") {
-          clearPoll();
-        }
-      } catch {
-        if (!cancelled) {
-          setStatusPollError(COPY.statusPollError);
-        }
-      }
-    };
-
-    void tick();
-    pollIntervalRef.current = window.setInterval(tick, 2000);
-    return () => {
-      cancelled = true;
-      clearPoll();
-    };
-  }, [successJobId]);
 
   const openFilePicker = () => {
     fileInputRef.current?.click();
@@ -261,14 +143,6 @@ export function ManualUpload() {
   const handleUpload = async () => {
     if (!file || uploading) return;
     setErrorMessage(null);
-    setSuccessJobId(null);
-    setJobStatus(null);
-    setJobError(null);
-    setSceneKey(null);
-    setVideoKey(null);
-    setVideoUrl(null);
-    videoUrlFetchedRef.current = false;
-    setStatusPollError(null);
     setUploading(true);
     setProgress(0);
 
@@ -347,8 +221,8 @@ export function ManualUpload() {
         return;
       }
 
-      setSuccessJobId(session.jobId);
       setFile(null);
+      router.push(`/jobs/${session.jobId}`);
     } catch {
       setErrorMessage(COPY.errS3);
     } finally {
@@ -358,35 +232,51 @@ export function ManualUpload() {
   };
 
   return (
-    <div className="flex flex-col gap-4">
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-xl font-semibold leading-[1.2]">
-            {COPY.emptyHeading}
-          </CardTitle>
-          <CardDescription className="text-base leading-normal">
-            {COPY.emptyBody}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
+    <div className="flex flex-col gap-6">
+      <div className="relative overflow-hidden rounded-3xl border border-teal-900/10 bg-white/80 shadow-[0_24px_80px_-24px_rgba(15,118,110,0.35)] backdrop-blur-md dark:bg-card/80">
+        <BorderBeam
+          size={70}
+          duration={11}
+          borderWidth={2}
+          colorFrom="#fb923c"
+          colorTo="#14b8a6"
+        />
+        <BorderBeam
+          size={48}
+          duration={15}
+          delay={4}
+          borderWidth={1}
+          reverse
+          colorFrom="#fbbf24"
+          colorTo="#f97316"
+        />
+        <div className="relative z-10 space-y-6 p-6 md:p-8">
+          <div className="space-y-2">
+            <h2 className="font-display text-2xl font-bold tracking-tight text-slate-900 md:text-[1.65rem]">
+              {COPY.emptyHeading}
+            </h2>
+            <p className="text-base leading-relaxed text-slate-600">
+              {COPY.emptyBody}
+            </p>
+          </div>
+
           <div
             {...getRootProps({
               "data-testid": "manual-dropzone",
               className: cn(
-                "flex min-h-[200px] flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed px-4 py-8 text-center transition-colors",
+                "flex min-h-[220px] flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed px-5 py-10 text-center transition-all duration-300",
                 isDragActive
-                  ? "border-neutral-900 bg-slate-100"
-                  : "border-slate-300 bg-white",
+                  ? "border-orange-400 bg-gradient-to-br from-teal-50/90 via-amber-50/60 to-orange-50/80 shadow-inner ring-2 ring-orange-300/40"
+                  : "border-slate-300/90 bg-gradient-to-b from-white to-slate-50/80 shadow-sm hover:border-teal-400/50 hover:shadow-md",
                 uploading && "pointer-events-none opacity-60",
               ),
             })}
           >
             <input {...getInputProps({ id: inputId })} />
-            <FileText
-              className="size-8 text-muted-foreground"
-              aria-hidden
-            />
-            <p className="text-base leading-normal text-muted-foreground">
+            <div className="flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br from-teal-600 to-orange-500 text-white shadow-lg shadow-orange-500/25">
+              <FileText className="size-7" aria-hidden />
+            </div>
+            <p className="max-w-sm text-base leading-relaxed text-slate-600">
               {isDragActive
                 ? "Release to add your manual."
                 : "Drag your PDF here, then upload when ready."}
@@ -409,14 +299,6 @@ export function ManualUpload() {
                 } else {
                   setFile(next);
                   setErrorMessage(null);
-                  setSuccessJobId(null);
-                  setJobStatus(null);
-                  setJobError(null);
-                  setSceneKey(null);
-                  setVideoKey(null);
-                  setVideoUrl(null);
-                  videoUrlFetchedRef.current = false;
-                  setStatusPollError(null);
                 }
               }
               event.target.value = "";
@@ -424,13 +306,13 @@ export function ManualUpload() {
           />
 
           {file ? (
-            <div className="space-y-2 rounded-lg border border-border bg-card p-4">
+            <div className="space-y-2 rounded-2xl border border-teal-800/10 bg-teal-50/40 p-4 ring-1 ring-teal-700/10">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-sm font-semibold leading-[1.4]">
+                  <p className="text-sm font-semibold leading-[1.4] text-slate-900">
                     {file.name}
                   </p>
-                  <p className="text-base leading-normal text-muted-foreground">
+                  <p className="text-base leading-normal text-slate-600">
                     {formatBytes(file.size)}
                   </p>
                 </div>
@@ -440,109 +322,55 @@ export function ManualUpload() {
 
           {uploading ? (
             <div className="space-y-2">
-              <Progress value={progress} className="w-full" />
-              <p className="text-sm text-muted-foreground">{COPY.primaryUploading}</p>
+              <Progress value={progress} className="h-2 w-full bg-slate-200/80" />
+              <p className="text-sm font-medium text-teal-900/80">
+                {COPY.primaryUploading}
+              </p>
             </div>
           ) : null}
-        </CardContent>
-        <CardFooter className="flex flex-col gap-3 sm:flex-row sm:justify-end">
-          <Button
-            type="button"
-            variant="outline"
-            className="min-h-11 w-full sm:w-auto"
-            onClick={handleChooseClick}
-            disabled={uploading}
-          >
-            {COPY.secondary}
-          </Button>
-          <Button
-            type="button"
-            className="min-h-11 w-full sm:w-auto"
-            onClick={handleUpload}
-            disabled={!file || uploading}
-          >
-            {uploading ? (
-              <span className="inline-flex items-center gap-2">
-                <Loader2 className="size-4 animate-spin" aria-hidden />
-                {COPY.primaryUploading}
-              </span>
-            ) : (
-              COPY.primaryCta
-            )}
-          </Button>
-        </CardFooter>
-      </Card>
+
+          <div className="flex flex-col gap-3 pt-1 sm:flex-row sm:justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              className="min-h-12 w-full rounded-full border-2 border-slate-300/80 bg-white/90 font-semibold text-slate-800 shadow-sm transition-all hover:border-orange-400/70 hover:bg-gradient-to-r hover:from-amber-50 hover:to-orange-50 hover:text-slate-900 sm:w-auto"
+              onClick={handleChooseClick}
+              disabled={uploading}
+            >
+              {COPY.secondary}
+            </Button>
+            <ShimmerButton
+              type="button"
+              borderRadius="9999px"
+              className="min-h-12 w-full font-display text-sm font-semibold tracking-wide sm:w-auto sm:min-w-[14rem]"
+              background="linear-gradient(135deg, #0f766e 0%, #0d9488 42%, #115e59 100%)"
+              shimmerColor="#fde68a"
+              shimmerDuration="2.8s"
+              onClick={handleUpload}
+              disabled={!file || uploading}
+            >
+              {uploading ? (
+                <span className="relative z-10 inline-flex items-center gap-2">
+                  <Loader2 className="size-4 animate-spin" aria-hidden />
+                  {COPY.primaryUploading}
+                </span>
+              ) : (
+                <span className="relative z-10">{COPY.primaryCta}</span>
+              )}
+            </ShimmerButton>
+          </div>
+        </div>
+      </div>
 
       {errorMessage ? (
-        <Alert variant="destructive">
+        <Alert
+          variant="destructive"
+          className="rounded-2xl border-red-200/80 bg-red-50/90 shadow-md"
+        >
           <AlertCircle className="size-4" />
-          <AlertTitle>Error</AlertTitle>
-          <AlertDescription className="whitespace-pre-line">
+          <AlertTitle className="font-display font-semibold">Something blocked the upload</AlertTitle>
+          <AlertDescription className="whitespace-pre-line text-red-950/90">
             {errorMessage}
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
-      {successJobId ? (
-        <Alert>
-          <CheckCircle2 className="size-4 text-primary" />
-          <AlertTitle>{COPY.successTitle}</AlertTitle>
-          <AlertDescription className="space-y-2">
-            <p>{COPY.successBody}</p>
-            <p className="font-mono text-xs text-muted-foreground">
-              Job id: {successJobId}
-            </p>
-            {statusPollError ? (
-              <p className="text-sm text-amber-800 dark:text-amber-200">
-                {statusPollError}
-              </p>
-            ) : null}
-            {jobStatus ? (
-              <div className="space-y-1 text-sm">
-                <p className="font-medium">
-                  {jobStatus === "queued"
-                    ? COPY.statusQueued
-                    : jobStatus === "processing"
-                      ? COPY.statusProcessing
-                      : jobStatus === "completed"
-                        ? COPY.statusCompleted
-                        : COPY.statusFailed}
-                </p>
-                {jobStatus === "failed" && jobError ? (
-                  <div className="mt-1 rounded-md bg-destructive/10 p-3">
-                    <p className="text-sm font-medium text-destructive">{jobError}</p>
-                  </div>
-                ) : null}
-                {jobStatus === "completed" && sceneKey ? (
-                  <div className="space-y-1">
-                    <p className="text-sm font-semibold leading-[1.4]">
-                      Scene key
-                    </p>
-                    <p className="break-all font-mono text-base text-[#64748b]">
-                      {sceneKey}
-                    </p>
-                  </div>
-                ) : null}
-                {jobStatus === "completed" && videoUrl ? (
-                  <video
-                    controls
-                    src={videoUrl}
-                    className="mt-2 w-full rounded-lg"
-                    aria-label="Assembly video preview"
-                  >
-                    Your browser does not support HTML5 video.
-                  </video>
-                ) : null}
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                <Loader2
-                  className="mr-1 inline size-3.5 animate-spin align-middle"
-                  aria-hidden
-                />
-                Checking status…
-              </p>
-            )}
           </AlertDescription>
         </Alert>
       ) : null}

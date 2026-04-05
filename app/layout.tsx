@@ -1,10 +1,19 @@
 import type { Metadata } from "next";
-import { GeistSans } from "geist/font/sans";
+import { Unbounded, Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
-import { Geist } from "next/font/google";
 import { cn } from "@/lib/utils";
 
-const geist = Geist({subsets:['latin'],variable:'--font-sans'});
+const unbounded = Unbounded({
+  subsets: ["latin"],
+  variable: "--font-display",
+  display: "swap",
+});
+
+const plusJakarta = Plus_Jakarta_Sans({
+  subsets: ["latin"],
+  variable: "--font-sans",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "Assembli",
@@ -17,8 +26,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={cn("font-sans", geist.variable)}>
-      <body className={`${GeistSans.className} antialiased`}>{children}</body>
+    <html
+      lang="en"
+      className={cn(plusJakarta.variable, unbounded.variable)}
+    >
+      <body className={cn(plusJakarta.className, "antialiased")}>
+        {children}
+      </body>
     </html>
   );
 }
