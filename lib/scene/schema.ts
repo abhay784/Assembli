@@ -51,6 +51,14 @@ const partSchema = z.object({
   holes: z.array(holeSchema).optional(),
   /** ID of another part this part physically connects to — drives slide-together animation. */
   connectsTo: z.string().optional(),
+  /** URL to an extracted sprite image of this part (from the manual's hardware page). When present, the renderer uses this image instead of generic geometric shapes. */
+  imageUrl: z.string().optional(),
+  /** When true, this is the ONLY part animated over the background image. All other parts are baked into the background. Only meaningful when the step has backgroundImageUrl. */
+  isActiveSprite: z.boolean().optional(),
+  /** Target X position as a percentage (0–100) of the background image width. Set by Claude based on where the hole/target appears in the diagram. */
+  pageXPct: z.number().min(0).max(100).optional(),
+  /** Target Y position as a percentage (0–100) of the background image height. Set by Claude based on where the hole/target appears in the diagram. */
+  pageYPct: z.number().min(0).max(100).optional(),
 });
 
 const toolIconSchema = z.object({
@@ -93,6 +101,14 @@ const stepSchema = z.object({
   toolIcons: z.array(toolIconSchema).optional(),
   /** Zoom callout showing detail of a specific area. */
   detailInset: detailInsetSchema.optional(),
+  /** 0-based PDF page index that contains the diagram for this step. Emitted by Claude; used by the pipeline to rasterize the background image. */
+  pageIndex: z.number().int().min(0).optional(),
+  /** URL to the rasterized page image. NOT emitted by Claude — injected by the pipeline after rasterization. */
+  backgroundImageUrl: z.string().optional(),
+  /** Pixel width of the background image. NOT emitted by Claude — injected by the pipeline for letterbox math in the renderer. */
+  bgImageWidth: z.number().int().positive().optional(),
+  /** Pixel height of the background image. NOT emitted by Claude — injected by the pipeline for letterbox math in the renderer. */
+  bgImageHeight: z.number().int().positive().optional(),
 });
 
 export const sceneSchema = z

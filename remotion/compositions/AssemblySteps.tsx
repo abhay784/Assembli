@@ -2,9 +2,11 @@ import React from "react";
 import {
   AbsoluteFill,
   Audio,
+  Img,
   interpolate,
   Sequence,
   spring,
+  staticFile,
   useCurrentFrame,
 } from "remotion";
 import type { RenderInput } from "../../lib/render/schema";
@@ -230,9 +232,21 @@ function computeAllPositions(
       }
     }
 
-    // Screw starts at its own (x,y) and travels to the hole
-    const x = interpolate(prog, [0, 1], [part.x, destX]);
-    const y = interpolate(prog, [0, 1], [part.y, destY]);
+    // Screw starts at its own (x,y) and travels to the hole.
+    // If Claude placed the fastener at/near the hole instead of above it,
+    // auto-compute a sensible starting position using the insertion angle.
+    let startX = part.x;
+    let startY = part.y;
+    const distToHole = Math.sqrt((part.x - destX) ** 2 + (part.y - destY) ** 2);
+    if (distToHole < 30) {
+      // Offset backward from the hole in the direction opposite to insertion
+      const angleRad = (part.insertionTarget.angle * Math.PI) / 180;
+      const offsetDist = 90;
+      startX = destX + Math.sin(angleRad) * offsetDist;
+      startY = destY - Math.cos(angleRad) * offsetDist;
+    }
+    const x = interpolate(prog, [0, 1], [startX, destX]);
+    const y = interpolate(prog, [0, 1], [startY, destY]);
 
     // Sink phase: after arriving, screw pushes further into the hole
     const sinkProgress = interpolate(adjFrame, [30, 60], [0, 1], {
@@ -569,9 +583,16 @@ function LeftPanel({
   );
 }
 
+// ─── Rendered canvas size constants (1920×1080 output, 320px sidebar) ────────
+const CANVAS_RENDERED_W = 1600;
+const CANVAS_RENDERED_H = 800;
+
 // ─── Isometric SVG canvas ────────────────────────────────────────────────────
 function IsoCanvas({ step, frame }: { step: StepType; frame: number }) {
-  const posMap = computeAllPositions(step.parts, frame);
+  const isBackgroundMode = !!step.backgroundImageUrl;
+  const posMap = isBackgroundMode
+    ? new Map<string, { x: number; y: number; prog: number; opacity: number; sinkProgress: number }>()
+    : computeAllPositions(step.parts, frame);
 
   return (
     <div
@@ -589,18 +610,32 @@ function IsoCanvas({ step, frame }: { step: StepType; frame: number }) {
         aspectRatio: `${CANVAS_W} / ${CANVAS_H}`,
       }}
     >
-      {/* Blueprint dot grid */}
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          backgroundImage:
-            "radial-gradient(circle, #CBD5E1 1px, transparent 1px)",
-          backgroundSize: "32px 32px",
-          backgroundPosition: "16px 16px",
-          opacity: 0.4,
-        }}
-      />
+      {/* Background: manual diagram page (full opacity) or dot grid fallback */}
+      {step.backgroundImageUrl ? (
+        <Img
+          src={step.backgroundImageUrl}
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "contain",
+            opacity: 1,
+          }}
+        />
+      ) : (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            backgroundImage:
+              "radial-gradient(circle, #CBD5E1 1px, transparent 1px)",
+            backgroundSize: "32px 32px",
+            backgroundPosition: "16px 16px",
+            opacity: 0.4,
+          }}
+        />
+      )}
 
       {/* Drafting corner marks */}
       {[
@@ -624,7 +659,11 @@ function IsoCanvas({ step, frame }: { step: StepType; frame: number }) {
         />
       ))}
 
-      <svg
+      {/* Sprite overlay — only in background mode */}
+      {isBackgroundMode && <SpriteOverlayLayer step={step} frame={frame} />}
+
+      {/* SVG isometric rendering — suppressed in background mode */}
+      {!isBackgroundMode && <svg
         viewBox={`0 0 ${CANVAS_W} ${CANVAS_H}`}
         width="100%"
         height="100%"
@@ -746,11 +785,21 @@ function IsoCanvas({ step, frame }: { step: StepType; frame: number }) {
             holeY = tgtPos.y + tgtPart.holes[hi].hy;
           }
 
+          // Use same auto-corrected start position as the animation system
+          let srcX = part.x;
+          let srcY = part.y;
+          const distToHole = Math.sqrt((part.x - holeX) ** 2 + (part.y - holeY) ** 2);
+          if (distToHole < 30) {
+            const angleRad = (part.insertionTarget.angle * Math.PI) / 180;
+            srcX = holeX + Math.sin(angleRad) * 90;
+            srcY = holeY - Math.cos(angleRad) * 90;
+          }
+
           return (
             <InsertionArrow
               key={`arrow-${part.id}`}
-              srcX={part.x}
-              srcY={part.y}
+              srcX={srcX}
+              srcY={srcY}
               holeX={holeX}
               holeY={holeY}
               angle={part.insertionTarget.angle}
@@ -760,7 +809,7 @@ function IsoCanvas({ step, frame }: { step: StepType; frame: number }) {
           );
         })}
 
-        {/* Layer 4: Screw/dowel parts (on top of holes and arrows) */}
+        {/* Layer 4: Screw/dowel parts — labels suppressed for insertion targets (grouped below) */}
         {step.parts.map((part, partIndex) => {
           const shape = part.shape ?? inferShape(part.label);
           if (shape !== "screw" && shape !== "dowel") return null;
@@ -772,9 +821,61 @@ function IsoCanvas({ step, frame }: { step: StepType; frame: number }) {
               frame={frame}
               totalParts={step.parts.length}
               posMap={posMap}
+              suppressLabel={!!part.insertionTarget}
             />
           );
         })}
+
+        {/* Layer 4.5: Grouped fastener labels — one badge per unique label at hole cluster center */}
+        {(() => {
+          // Group insertionTarget fasteners by label, find centroid of their holes
+          const groups = new Map<string, { holeXs: number[]; holeYs: number[]; count: number }>();
+          step.parts.forEach((part) => {
+            if (!part.insertionTarget) return;
+            const tgtPart = step.parts.find((p) => p.id === part.insertionTarget!.targetPartId);
+            if (!tgtPart) return;
+            const tgtPos = posMap.get(tgtPart.id);
+            if (!tgtPos) return;
+            const hi = part.insertionTarget.holeIndex;
+            let hx = tgtPos.x;
+            let hy = tgtPos.y;
+            if (hi != null && tgtPart.holes?.[hi]) {
+              hx = tgtPos.x + tgtPart.holes[hi].hx;
+              hy = tgtPos.y + tgtPart.holes[hi].hy;
+            }
+            const existing = groups.get(part.label) ?? { holeXs: [], holeYs: [], count: 0 };
+            existing.holeXs.push(hx);
+            existing.holeYs.push(hy);
+            existing.count++;
+            groups.set(part.label, existing);
+          });
+
+          const labelAlpha = interpolate(frame, [10, 25], [0, 1], {
+            extrapolateLeft: "clamp",
+            extrapolateRight: "clamp",
+          });
+
+          return Array.from(groups.entries()).map(([label, { holeXs, holeYs, count }]) => {
+            const cx = holeXs.reduce((a, b) => a + b, 0) / holeXs.length;
+            const cy = holeYs.reduce((a, b) => a + b, 0) / holeYs.length;
+            const displayLabel = count > 1 ? `${label} ×${count}` : label;
+            return (
+              <g key={`flabel-${label}`} opacity={labelAlpha}>
+                <text
+                  x={cx}
+                  y={cy + 28}
+                  textAnchor="middle"
+                  fontSize={12}
+                  fontWeight={700}
+                  fontFamily="Inter, SF Pro Display, Helvetica Neue, Arial, sans-serif"
+                  fill="#374151"
+                >
+                  {displayLabel}
+                </text>
+              </g>
+            );
+          });
+        })()}
 
         {/* Layer 5: Tool icons */}
         {step.toolIcons?.map((toolIcon, i) => (
@@ -795,7 +896,7 @@ function IsoCanvas({ step, frame }: { step: StepType; frame: number }) {
             frame={frame}
           />
         )}
-      </svg>
+      </svg>}
 
       <div
         style={{
@@ -811,6 +912,117 @@ function IsoCanvas({ step, frame }: { step: StepType; frame: number }) {
       >
         Assembly view
       </div>
+    </div>
+  );
+}
+
+// ─── Sprite overlay layer (background mode) ───────────────────────────────────
+function SpriteOverlayLayer({ step, frame }: { step: StepType; frame: number }) {
+  const activeParts = step.parts.filter(
+    (p) => p.isActiveSprite && p.imageUrl && p.pageXPct != null && p.pageYPct != null,
+  );
+  if (!activeParts.length) return null;
+
+  // Compute letterbox bounds for objectFit:contain
+  const imgW = step.bgImageWidth ?? 794;    // A4 at 96dpi fallback
+  const imgH = step.bgImageHeight ?? 1123;
+  const imgAspect = imgW / imgH;
+  const containerAspect = CANVAS_RENDERED_W / CANVAS_RENDERED_H;
+
+  let displayW: number, displayH: number, offsetX: number, offsetY: number;
+  if (imgAspect > containerAspect) {
+    // Landscape image — letterboxed (bars top/bottom)
+    displayW = CANVAS_RENDERED_W;
+    displayH = CANVAS_RENDERED_W / imgAspect;
+    offsetX = 0;
+    offsetY = (CANVAS_RENDERED_H - displayH) / 2;
+  } else {
+    // Portrait image — pillarboxed (bars left/right)
+    displayH = CANVAS_RENDERED_H;
+    displayW = CANVAS_RENDERED_H * imgAspect;
+    offsetX = (CANVAS_RENDERED_W - displayW) / 2;
+    offsetY = 0;
+  }
+
+  return (
+    <div style={{ position: "absolute", inset: 0 }}>
+      {activeParts.map((part) => (
+        <ScrewSpriteOverlay
+          key={part.id}
+          part={part}
+          frame={frame}
+          displayW={displayW}
+          displayH={displayH}
+          offsetX={offsetX}
+          offsetY={offsetY}
+        />
+      ))}
+    </div>
+  );
+}
+
+// ─── Animated screw/fastener sprite over background image ─────────────────────
+function ScrewSpriteOverlay({
+  part,
+  frame,
+  displayW,
+  displayH,
+  offsetX,
+  offsetY,
+}: {
+  part: PartType;
+  frame: number;
+  displayW: number;
+  displayH: number;
+  offsetX: number;
+  offsetY: number;
+}) {
+  // Destination: hole position in container-pixel coordinates
+  const destX = offsetX + ((part.pageXPct ?? 50) / 100) * displayW;
+  const destY = offsetY + ((part.pageYPct ?? 50) / 100) * displayH;
+
+  // Start: 15% of display height above the hole
+  const liftPx = displayH * 0.15;
+  const startY = destY - liftPx;
+
+  // Travel spring — same config as existing screw insertion
+  const prog = spring({
+    frame,
+    fps: FPS,
+    config: { damping: 18, stiffness: 80, mass: 1.2 },
+  });
+  const opacity = interpolate(frame, [0, 12], [0, 1], {
+    extrapolateRight: "clamp",
+  });
+  const currentY = interpolate(prog, [0, 1], [startY, destY]);
+
+  // Subtle fastening rotation: one full turn as the screw sinks
+  const sinkProg = interpolate(frame, [30, 60], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  const rotation = sinkProg * 360;
+
+  // Sprite size: 5% of displayed image width, minimum 24px
+  const spriteSize = Math.max(24, displayW * 0.05);
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: destX - spriteSize / 2,
+        top: currentY - spriteSize / 2,
+        width: spriteSize,
+        height: spriteSize,
+        opacity,
+        transform: `rotate(${rotation}deg)`,
+        filter: "drop-shadow(2px 4px 6px rgba(0,0,0,0.5))",
+      }}
+    >
+      <img
+        src={part.imageUrl}
+        style={{ width: "100%", height: "100%", objectFit: "contain" }}
+      />
     </div>
   );
 }
@@ -1263,6 +1475,26 @@ function DetailInset({
               const h = part.h ?? defaults.h;
               const d = part.d ?? defaults.d;
 
+              // Sprite image takes priority over geometric shapes
+              if (part.imageUrl) {
+                const spriteW = w * 1.2;
+                const spriteH = h > 30 ? h * 1.2 : w * 1.2;
+                return (
+                  <SpriteImage
+                    key={`inset-${part.id}`}
+                    cx={pos.x}
+                    cy={pos.y}
+                    w={spriteW}
+                    h={spriteH}
+                    imageUrl={part.imageUrl}
+                    opacity={1}
+                    rotation={part.rotationDeg}
+                    label=""
+                    colors={colors}
+                  />
+                );
+              }
+
               if (shape === "screw") {
                 return (
                   <ScrewShape
@@ -1348,12 +1580,14 @@ function IsoPart({
   frame,
   totalParts,
   posMap,
+  suppressLabel = false,
 }: {
   part: PartType;
   partIndex: number;
   frame: number;
   totalParts: number;
   posMap: Map<string, AnimPos>;
+  suppressLabel?: boolean;
 }) {
   const shape = part.shape ?? inferShape(part.label);
   const material = part.material ?? inferMaterial(part.label, shape);
@@ -1399,6 +1633,27 @@ function IsoPart({
 
   const fromY = shape === "screw" || shape === "dowel" ? -80 : -120;
 
+  const displayLabel = suppressLabel ? "" : part.label;
+
+  // When a sprite image is available, render it instead of geometric shapes
+  if (part.imageUrl) {
+    const spriteW = w * 1.2;
+    const spriteH = h > 30 ? h * 1.2 : w * 1.2;
+    return (
+      <SpriteImage
+        cx={finalX}
+        cy={finalY}
+        w={spriteW}
+        h={spriteH}
+        imageUrl={part.imageUrl}
+        opacity={opacity}
+        rotation={totalRot}
+        label={displayLabel}
+        colors={colors}
+      />
+    );
+  }
+
   if (shape === "screw") {
     return (
       <ScrewShape
@@ -1407,7 +1662,7 @@ function IsoPart({
         colors={colors}
         opacity={opacity}
         rotation={totalRot}
-        label={part.label}
+        label={displayLabel}
       />
     );
   }
@@ -1423,7 +1678,7 @@ function IsoPart({
         colors={colors}
         opacity={opacity}
         rotation={totalRot}
-        label={part.label}
+        label={displayLabel}
       />
     );
   }
@@ -1438,10 +1693,95 @@ function IsoPart({
       colors={colors}
       opacity={opacity}
       rotation={totalRot}
-      label={part.label}
+      label={displayLabel}
       showMotion={prog < 0.85 && prog > 0.15 && partIndex > 0}
       motionFromY={fromY}
     />
+  );
+}
+
+// ─── Sprite image (extracted part illustration from manual) ──────────────────
+function SpriteImage({
+  cx,
+  cy,
+  w,
+  h,
+  imageUrl,
+  opacity,
+  rotation,
+  label,
+  colors,
+}: {
+  cx: number;
+  cy: number;
+  w: number;
+  h: number;
+  imageUrl: string;
+  opacity: number;
+  rotation: number;
+  label: string;
+  colors: (typeof MATERIALS)[MaterialKey];
+}) {
+  const labelY = h / 2 + 22;
+
+  return (
+    <g
+      transform={`translate(${cx}, ${cy}) rotate(${rotation})`}
+      opacity={opacity}
+      filter="url(#partShadow)"
+    >
+      <foreignObject
+        x={-w / 2}
+        y={-h / 2}
+        width={w}
+        height={h}
+      >
+        <div
+          style={{
+            width: "100%",
+            height: "100%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <img
+            src={imageUrl}
+            style={{
+              maxWidth: "100%",
+              maxHeight: "100%",
+              objectFit: "contain",
+            }}
+          />
+        </div>
+      </foreignObject>
+
+      {label && (
+        <>
+          <text
+            x={0}
+            y={labelY}
+            textAnchor="middle"
+            fontSize={13}
+            fontWeight={700}
+            fontFamily="Inter, SF Pro Display, Helvetica Neue, Arial, sans-serif"
+            fill={colors.label}
+            letterSpacing="0.02em"
+          >
+            {label}
+          </text>
+          <line
+            x1={0}
+            y1={h / 2 + 2}
+            x2={0}
+            y2={labelY - 14}
+            stroke={colors.stroke}
+            strokeWidth={1}
+            opacity={0.35}
+          />
+        </>
+      )}
+    </g>
   );
 }
 

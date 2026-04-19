@@ -49,7 +49,13 @@ Create ONE separate part per fastener. Do NOT combine multiple screws into "Scre
 
 The number of holes on a receiving part MUST exactly match the number of individual fastener parts targeting it. Count carefully from the manual diagrams — getting screw count and placement wrong makes the video misleading.
 
-Position each screw at its STARTING location ABOVE/BESIDE the target — NOT at the hole. The screw's (x,y) is where it begins. The animation system automatically moves it from there to the hole. Place screws offset from the target in the direction opposite to the insertion angle. For angle:0 (down), place the screw ABOVE the target (lower y value).
+Position each fastener (screw, dowel, bolt) at its STARTING location AWAY from the target — NOT at the hole. The fastener's (x,y) is where it BEGINS before animating. The animation system moves it to the hole automatically. Offset at least 80-120 units away in the opposite direction of insertion:
+- angle:0 (inserting DOWN) → place fastener ABOVE the hole: y = hole_y - 100 (LOWER y value)
+- angle:180 (inserting UP) → place fastener BELOW the hole: y = hole_y + 100
+- angle:90 (inserting LEFT) → place fastener to the RIGHT: x = hole_x + 100
+- angle:270 (inserting RIGHT) → place fastener to the LEFT: x = hole_x - 100
+
+If you emit a fastener at the same (x,y) as its hole, the animation will not work — the fastener will appear frozen at the hole with no travel motion. Always create visible separation.
 
 For fastener parts (screws, bolts, dowels), ALWAYS include an insertionTarget object:
 - targetPartId: the id of the part the fastener connects to.
@@ -73,7 +79,15 @@ Include toolIcons at the step level to show tools visually on the diagram:
 For steps with intricate connections, include a detailInset to create a zoom callout:
 - cx, cy, radius: the source region to magnify.
 - anchorX, anchorY: where to draw the magnified bubble (pick an empty area of the canvas).
-- zoom: magnification factor (optional, default 2.5).`;
+- zoom: magnification factor (optional, default 2.5).
+
+For each step, include "pageIndex" — the 0-based PDF page index that contains the diagram for that assembly step. This tells the pipeline which page to rasterize as the background image. If multiple steps come from the same page, they share the same pageIndex. Count pages starting from 0 (first page = 0). Do NOT include "backgroundImageUrl", "bgImageWidth", or "bgImageHeight" — the pipeline injects those after rasterization.
+
+BACKGROUND-MODE STEPS — For steps where a fastener (screw, bolt, cam bolt) is physically driven into a hole:
+- Set "isActiveSprite": true on exactly ONE part — the part that moves into position (almost always a screw or fastener with imageUrl set).
+- Set "pageXPct" and "pageYPct" on that same part: the destination hole position as a percentage of the PAGE dimensions (0–100). Estimate from where the hole appears in the diagram — e.g., if the hole is roughly 60% across and 40% down the page, use pageXPct:60 pageYPct:40.
+- The renderer will show the manual page as a full-opacity static background and animate ONLY the isActiveSprite part as a foreground sprite flying down into the hole.
+- Only set isActiveSprite on a part that also has imageUrl set. Do NOT set it on parts without a sprite image.`;
 
 function textFromMessage(message: Message): string {
   const parts: string[] = [];
@@ -88,12 +102,23 @@ function textFromMessage(message: Message): string {
 export async function extractSceneFromPdfBuffer(options: {
   pdfBuffer: Buffer;
   maxAttempts?: number;
+  /** Map of partNumber → imageUrl for extracted sprites. When provided, Claude is instructed to set imageUrl on parts matching these part numbers. */
+  spriteMap?: Map<string, string>;
 }): Promise<SceneJSON> {
   // D-08: default maxAttempts = 3 (initial try + up to 2 retries after validation failure)
   const maxAttempts = options.maxAttempts ?? 3;
   const client = new Anthropic({ apiKey: getAnthropicApiKey() });
   const model = getClaudeModel();
   const pdfBase64 = options.pdfBuffer.toString("base64");
+
+  // Build sprite reference text for the prompt
+  let spriteInstruction = "";
+  if (options.spriteMap && options.spriteMap.size > 0) {
+    const entries = Array.from(options.spriteMap.entries())
+      .map(([partNum, url]) => `  "${partNum}": "${url}"`)
+      .join(",\n");
+    spriteInstruction = `\n\nIMPORTANT — Part sprite images are available. For each part you emit, if it corresponds to one of these part numbers from the manual's hardware page, set the "imageUrl" field to the matching URL. The renderer will display the actual part illustration instead of a generic shape.\n\nAvailable part sprites:\n{\n${entries}\n}\n\nWhen a part in any step uses hardware with one of these part numbers, include: "imageUrl": "<matching URL>". Parts without a matching sprite will fall back to geometric rendering.`;
+  }
 
   const messages: MessageParam[] = [
     {
@@ -109,7 +134,7 @@ export async function extractSceneFromPdfBuffer(options: {
         },
         {
           type: "text",
-          text: "Return SceneJSON for all assembly steps in this PDF.",
+          text: `Return SceneJSON for all assembly steps in this PDF.${spriteInstruction}`,
         },
       ],
     },

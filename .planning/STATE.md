@@ -81,9 +81,10 @@ Recent decisions affecting current work:
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 260404-rst | Remove ElevenLabs TTS temporarily and render full-length videos using placeholder/silent audio | 2026-04-05 | aeeed87 | [260404-rst-remove-elevenlabs-tts-temporarily-and-re](.planning/quick/260404-rst-remove-elevenlabs-tts-temporarily-and-re/) |
+| 260405-ekf | Implement sprite-based assembly animation pipeline with PDF page backgrounds | 2026-04-05 | 107d9ea | [260405-ekf-implement-sprite-based-assembly-animatio](.planning/quick/260405-ekf-implement-sprite-based-assembly-animatio/) |
 
 ## Session Continuity
 
-Last session: 2026-04-05T05:17:24.730Z
-Stopped at: Phase 04 UI-SPEC approved
+Last session: 2026-04-05T17:34:38Z
+Stopped at: Quick task 260405-ekf complete
 Resume file: .planning/phases/04-pipeline-integration-and-output/04-UI-SPEC.md
